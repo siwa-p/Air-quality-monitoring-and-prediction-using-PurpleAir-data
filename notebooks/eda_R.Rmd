@@ -1,0 +1,94 @@
+```{r}
+library(tidyverse)
+library(broom)
+library(glue)
+```
+
+Load the nashville sensors data
+
+```{r}
+sensor_nashville <- read_csv('../datasets/sensor_nashville.csv')
+```
+
+```{r}
+colnames(sensor_nashville)
+```
+
+
+check datatypes
+```{r}
+str(sensor_nashville)
+```
+looks like the time_stamp is in the right format
+
+let's look at some statistics on that column
+
+```{r}
+mean(sensor_nashville$time_stamp)
+```
+
+this is a 14 day data starting on 6-01-2022 so makes sense
+
+```{r}
+p <- ggplot(sensor_nashville, aes(x=time_stamp, y= pm2.5_cf_1_a))+
+  geom_line(aes(color = sensor_index))
+
+p
+```
+
+
+
+
+
+```{r}
+sensor_fit <- sensor_nashville %>%
+  select("sensor_index" ,"humidity_a" ,"temperature_a","pressure_a","pm2.5_cf_1_a","pm2.5_cf_1_b" )|>
+  nest(data = -sensor_index) %>%     # nest the data table by species
+  mutate(
+    # use map() to fit a model to each nested data table
+    fit = map(data, ~lm(pm2.5_cf_1_a ~ temperature_a, data = .x)),
+    # use map to apply glance() to each model fit
+    glance_out = map(fit, glance)
+  ) %>%
+  unnest(cols = glance_out) %>% # unnest output from glance
+  select(-data, -fit)           # remove columns data and fit
+```
+
+```{r}
+ggplot(sensor_nashville, aes(pm2.5_cf_1_a, temperature_a)) +
+  geom_point(na.rm = TRUE) +
+  geom_smooth(method = "lm", na.rm = TRUE) +
+  facet_wrap(vars(sensor_index))
+```
+```{r}
+# first do the data table manipulation
+labels_data <- sensor_fit %>%
+  mutate(
+    pm2.5_cf_1_a = 25,
+    temperature_a = 120,
+    label = glue("p = {signif(p.value, 3)}")
+  ) %>%
+  select(sensor_index, pm2.5_cf_1_a, temperature_a, label)
+  
+# then plot
+ggplot(sensor_nashville, aes(pm2.5_cf_1_a, temperature_a)) +
+  geom_point(na.rm = TRUE) +
+  geom_smooth(method = "lm", na.rm = TRUE) +
+  facet_wrap(vars(sensor_index))+
+  geom_text(
+    data = labels_data,
+    aes(label = label)
+  )
+```
+
+
+
+
+```{r}
+ggplot(sensor_nashville, aes(x=time_stamp, y= pm2.5_cf_1_a))+
+  geom_line(aes())+
+  facet_wrap(vars(sensor_index))
+
+```
+
+
