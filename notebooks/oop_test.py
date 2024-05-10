@@ -55,7 +55,7 @@ def plot_data(model_instance, xlabel='xlabel', ylabel='ylabel', title='Plot', co
     plt.show()
     
 if __name__ == '__main__':
-    model_instance = Model('capstone/datasets/sensor_nashville.csv',LinearRegression)
+    model_instance = Model('datasets/sensor_nashville.csv',LinearRegression)
     model_instance.split(0.2,predictors=predictors, target=target)
     model_instance.fit()
     
