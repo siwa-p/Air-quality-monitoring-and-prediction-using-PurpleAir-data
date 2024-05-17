@@ -5,8 +5,8 @@
 
 -- Decide on location and what data to use
 with my_location as (
-  SELECT  ST_GEOGPOINT(-73.764, 41.197) as my_location,
-          'Chappaqua' as home
+  SELECT  ST_GEOGPOINT(-83.94, 35.97) as my_location,
+          'Knoxville' as home
 ), 
 
 stations as (
@@ -40,4 +40,6 @@ AND   gc.usaf = gs.stn
 AND   gc.wban = gs.wban
 
 GROUP BY home, my_location, usaf, wban, name, lon, lat, country, state, miles
-ORDER BY miles ASC
+ORDER BY miles ASC;
+
+
