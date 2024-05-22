@@ -20,7 +20,8 @@ stations as (
 get_closest as (
   SELECT home,my_location, st.*, 
   FROM (
-    SELECT ST_ASTEXT(my_location) as my_location, 
+    SELECT 
+           ST_ASTEXT(my_location) as my_location, 
            home,
            ARRAY_AGG( # get the closest station
               STRUCT(usaf,wban,name,lon,lat,country,state,
@@ -30,16 +31,20 @@ get_closest as (
     WHERE ST_DWITHIN(my_location, b.latlon_geo, 32187)  --meters = 20 miles
     GROUP BY my_location, home
   ), UNNEST(stations) as st
+  WHERE st.miles = (  -- Filter for station with minimum distance
+    SELECT MIN(miles) FROM UNNEST(stations)
+  )
 )
-
-SELECT gc.*, COUNT(temp) as temp_data_points, COUNT(wdsp) as wind_speed_data_points
+SELECT  gc.*, 
+    gs.temp AS temperature,
+    gs.wdsp AS wind_speed,
+    gs.gust AS wind_gust,
+    gs.mxpsd AS max_wind_speed,
+    gs.prcp AS precipitation
 FROM get_closest gc, `bigquery-public-data.noaa_gsod.gsod20*` gs
-WHERE max != 9999.9 # code for missing data
-AND   _TABLE_SUFFIX BETWEEN '11' AND '20'
-AND   gc.usaf = gs.stn
+WHERE max != 9999.9  -- code for missing data
+AND   DATE(gs.date) BETWEEN '2023-01-01' AND '2023-01-31'  -- Date range for 2023
+AND   gc.usaf = gs.stn  
 AND   gc.wban = gs.wban
-
-GROUP BY home, my_location, usaf, wban, name, lon, lat, country, state, miles
 ORDER BY miles ASC;
-
 
