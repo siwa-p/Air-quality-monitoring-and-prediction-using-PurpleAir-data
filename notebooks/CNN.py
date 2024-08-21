@@ -47,7 +47,7 @@ def generate_spatial_maps(data):
     spatial_maps = [create_spatial_map(data, ts, grid_x, grid_y) for ts in timestamps]
 
     spatial_maps = np.array(spatial_maps)
-    spatial_maps = spatial_maps / np.nanmax(spatial_maps)
+    # spatial_maps = spatial_maps / np.nanmax(spatial_maps)
     spatial_maps = np.nan_to_num(spatial_maps)
     
     return spatial_maps, grid_x, grid_y
@@ -112,12 +112,13 @@ def save_predictions(y_test, y_pred, grid_coordinates, sensor_cartesian_points, 
         pm_values_df['Percentage_Error'] = (pm_values_df['Absolute_Error'] / pm_values_df['Observed_PM2.5']).abs() * 100
         all_data = pd.concat([all_data, pm_values_df], ignore_index=True)
         
-    all_data.to_csv('datasets/daily_predictions_CNN.csv' ,index=False)
+    all_data.to_csv('datasets/daily_predictions_CNN_not_normalized.csv' ,index=False)
 
 
 if __name__ == "__main__":
     # Load preprocessed data
     filtered_merged_df = pd.read_csv('datasets/merged_data_CNN.csv', index_col=False)
+    filtered_merged_df = filtered_merged_df[(filtered_merged_df['pm2.5_atm_a']<500) & (filtered_merged_df['pm2.5_atm_b']<500)& (filtered_merged_df['pm2.5_atm_a']>0)]
 
     # Generate spatial maps
     spatial_maps, grid_x, grid_y = generate_spatial_maps(filtered_merged_df)
@@ -171,7 +172,7 @@ if __name__ == "__main__":
         current_date += timedelta(days=1)
 
     # Display sensor plots
-    save_predictions(y_test, y_pred, grid_coordinates, sensor_cartesian_points, unique_sensor_locs, dates)
+    # save_predictions(y_test, y_pred, grid_coordinates, sensor_cartesian_points, unique_sensor_locs, dates)
 
     # Reshape to the 2 dimensions
     y_test_reshaped = y_test.reshape(-1, 100, 101)
@@ -186,8 +187,8 @@ if __name__ == "__main__":
     # Display heatmaps of test data and predictions for a few timepoints.
     for i in range(0, len(y_test_reshaped), step_size):
         fig, ax = plt.subplots(1, 2, figsize=(12, 6))
-        sns.heatmap(y_test_reshaped[i], cmap='viridis', cbar=True, vmin=vmin, vmax=vmax, ax=ax[0])
+        sns.heatmap(y_test_reshaped[i], cmap='viridis', cbar=True, vmin=vmin, vmax=vmax-50, ax=ax[0])
         ax[0].set_title(f'True PM2.5 Levels ({dates[i]})')
-        sns.heatmap(y_pred_reshaped[i], cmap='viridis', cbar=True, vmin=vmin, vmax=vmax, ax=ax[1])
+        sns.heatmap(y_pred_reshaped[i], cmap='viridis', cbar=True, vmin=vmin, vmax=vmax-50, ax=ax[1])
         ax[1].set_title(f'Predicted PM2.5 Levels ({dates[i]})')
         plt.show()
