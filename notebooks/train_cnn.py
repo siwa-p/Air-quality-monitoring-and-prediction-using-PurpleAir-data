@@ -60,12 +60,26 @@ with open('processed_data_values.pkl', 'rb') as f:
 # the input should be (number_of_sequences, number_of_channels, time_steps, height, width)  
 
 fields = np.array([item[0] for item in processed_data_values])  # shape (729, 100, 100)
+
+nan_counts = []
+nan_indices = []
+
+for i in range(len(fields)):
+    nan_count = np.isnan(fields[i]).sum()
+    nan_counts.append(nan_count)
+    if nan_count > 0:
+        nan_indices.append(i)
+
+# remove the timepoints with NaNs from fields
+fields_clean = np.delete(fields, nan_indices, axis=0)
+
+
 time_steps = 10 
 X,y = [], []
 
-for i in range(len(fields) - time_steps):
-    X.append(fields[i:i + time_steps])
-    y.append(fields[i + time_steps])
+for i in range(len(fields_clean) - time_steps):
+    X.append(fields_clean[i:i + time_steps])
+    y.append(fields_clean[i + time_steps])
 
 X = np.array(X)  # Shape: (number_of_sequences, time_steps, 100, 100)
 X = X[:, np.newaxis, :, :, :]  # Reshape to (number_of_sequences, 1, time_steps, 100, 100) # add 1 for channels
