@@ -53,23 +53,24 @@ transform = transforms.Compose([
 import pickle
 with open('processed_data_values.pkl', 'rb') as f:
     processed_data_values = pickle.load(f)
+    
+# the shape of my processed data is (num_samples, 3, 100, 100), where 3 is fields, xx, yy
+# 100 by 100 is the image size
 
-fields = [item[0] for item in processed_data_values] # List of interpolated fields
+# the input should be (number_of_sequences, number_of_channels, time_steps, height, width)  
 
-data_array = np.stack(fields, axis=0)
+fields = np.array([item[0] for item in processed_data_values])  # shape (729, 100, 100)
+time_steps = 10 
+X,y = [], []
 
-data_array = data_array[:, np.newaxis, :, :]  # For PyTorch
-# data_array = data_array[:, :, :, np.newaxis] 
+for i in range(len(fields) - time_steps):
+    X.append(fields[i:i + time_steps])
+    y.append(fields[i + time_steps])
 
-
-time_steps = 10
-X, y = [], []
-for i in range(len(data_array) - time_steps):
-    X.append(data_array[i:i + time_steps])
-    y.append(data_array[i + time_steps])
-
-X = np.array(X).reshape(-1, 1,time_steps, 100, 100)
-y = np.array(y)
+X = np.array(X)  # Shape: (number_of_sequences, time_steps, 100, 100)
+X = X[:, np.newaxis, :, :, :]  # Reshape to (number_of_sequences, 1, time_steps, 100, 100) # add 1 for channels
+y = np.array(y)  # Shape: (number_of_sequences, 100, 100)
+y = y[:, np.newaxis, :, :]  # Reshape to (number_of_sequences, 1, 100, 100)
 
 
 # Assuming X and y are NumPy arrays
@@ -122,9 +123,3 @@ for epoch in range(n_epochs):
 
 # Save the model
 torch.save(model.state_dict(), 'cnn_model.pth')
-
-    
-  
-
-
-    
