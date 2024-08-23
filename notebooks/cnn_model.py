@@ -10,13 +10,13 @@ class CNN(nn.Module):
             self.conv = nn.Conv3d(in_channels, out_channels, kernel_size, stride, padding)
             self.bn = nn.BatchNorm3d(out_channels)
             self.relu = nn.ReLU()
-            self.dropout = nn.Dropout3d(0.1)
+            self.dropout = nn.Dropout3d(0.2)
             
         def forward(self, x):
             x = self.relu(self.bn(self.conv(x)))
             return self.dropout(x)
         
-    def __init__(self, channels_l0=64, n_blocks=4, stride=2):
+    def __init__(self, channels_l0=64, n_blocks=3, stride=2):
         super().__init__()
         self.cnn_layers = nn.ModuleList()
         

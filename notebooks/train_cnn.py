@@ -43,9 +43,30 @@ class Normalize:
     def __call__(self, sample):
         # Normalize the data
         return (sample - sample.mean()) / sample.std()
+    
+class custom_horizontal_flip:
+    """ flips the tensor along the width dimension with a probability p """
+    def __call__(self, sample, p: float = 0.5):
+        if torch.rand(1).item() < p:
+            sample = torch.flip(sample, dims=[-1])  # Flip along the width dimension
+        return sample
 
-transform = transforms.Compose([
-    # ToTensor(),
+# custom vertical flip
+class custom_vertical_flip:
+    """ flips the tensor along the height dimension with a probability p """
+    def __call__(self, sample, p: float = 0.5):
+        if torch.rand(1).item() < p:
+            sample = torch.flip(sample, dims=[-2])  # Flip along the height dimension
+        return sample
+       
+
+train_transform = transforms.Compose([
+    Normalize(),
+    custom_horizontal_flip(),
+    custom_vertical_flip(),
+])
+
+val_transform = transforms.Compose([
     Normalize()
 ])
 
@@ -100,24 +121,24 @@ y_train, y_test = y[:split_index], y[split_index:]
 
 
 # Create dataset
-train_dataset = custom_dataset(X_train, y_train, transforms=transform)
-val_dataset = custom_dataset(X_test, y_test, transforms=transform)
+train_dataset = custom_dataset(X_train, y_train, transforms=train_transform)
+val_dataset = custom_dataset(X_test, y_test, transforms=val_transform)
 
 
 # Create dataloader
-batch_size = 4  # Adjust as needed
+batch_size = 8  # Adjust as needed
 train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
 # import model
 model = CNN().to(device)
 criterion = torch.nn.MSELoss()
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
-scheduler = StepLR(optimizer, step_size=5, gamma=0.5)
+scheduler = StepLR(optimizer, step_size=20, gamma=0.5)
 
 # Train the model
-n_epochs = 50
+n_epochs = 100
 for epoch in range(n_epochs):
     model.train()  
     for i, (X_batch, y_batch) in enumerate(train_dataloader):
