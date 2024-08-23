@@ -1,5 +1,7 @@
 import torch
 from torch.utils.data import DataLoader, Dataset
+from torch.optim.lr_scheduler import StepLR
+
 from torchvision import transforms
 from cnn_model import CNN
 import numpy as np
@@ -51,7 +53,7 @@ transform = transforms.Compose([
 
 # load data from pickle file
 import pickle
-with open('processed_data_values.pkl', 'rb') as f:
+with open('../datasets/processed_data_values.pkl', 'rb') as f:
     processed_data_values = pickle.load(f)
     
 # the shape of my processed data is (num_samples, 3, 100, 100), where 3 is fields, xx, yy
@@ -107,14 +109,15 @@ batch_size = 4  # Adjust as needed
 train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-
 # import model
 model = CNN().to(device)
 criterion = torch.nn.MSELoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+
+scheduler = StepLR(optimizer, step_size=5, gamma=0.5)
 
 # Train the model
-n_epochs = 10
+n_epochs = 50
 for epoch in range(n_epochs):
     model.train()  
     for i, (X_batch, y_batch) in enumerate(train_dataloader):
