@@ -1,7 +1,8 @@
 # Air Quality: Machine learning models applied to air quality data
-In this project, I will attempt to construct a predictive model for air-quality monitoring from data obtained from inexpensive air-sensors by PurpleAir and various meteorological data. I will use purpleAir API to gather data in a region(to be decided) for a period of time. Weather data will be obtained from BigQuery public database. 
 
-An application will be build that will let users visualize the data, the model and it’s predictions. 
+In this project, I have attempted to construct a predictive model for air-quality monitoring.
+The particulate data (PM2.5) were obtained from from inexpensive air-sensors by PurpleAir in Dallas Metropolitan area for the time period of (2022-04-01 to 2024-03-29).
+Various meteorological data were obtained from [NOAA](https://www.noaa.gov)
 
 ## Motivation:
 
@@ -16,14 +17,23 @@ These kinds of low-cost sensors fills the spatial and temporal gaps in air-
 quality detection and provides valuable information that is easily accessible to public.
 
 ## Data Question
-Can a machine learning model make reasonable air quality predictions
+
+Can we use machine learning models to make reasonable air quality predictions
 based on air-quality data from low-cost sensors along with other relevant
 meteorological data (Rain, Snow, Wind, Temperature, Season, smoke
 events, etc)?
 
-## Minimum Viable Product
-A streamlit dashboard for visualization of air quality data in city. Historical
-air quality graphs.
-A model to forecast air quality (Classification and Regression, Decision
-Tree).
-Artificial neural network trained on time series data for forecasting
+Can we use neural networks as yet another method of learning to predict from such data?
+
+## Collect data
+
+[PurpleAir API](https://api.purpleair.com/) provides an excellent source of real time as well as historical sensor data. The following notebook [purpleair_api.ipynb](notebooks/purpleair_api.ipynb) gets the list of sensors in a geographical area defined by a bounding box and then gets historical data for requested dates. Shout out to this awesome code for API call [zfarooqi](https://github.com/zfarooqui/py_purpleair_aqi/tree/main) for helping me get started with this.
+
+The airquality data was then loaded into sqlite for easy querying and analysis. 
+
+The weather data were downloaded from [NOAA](https://noaa.gov) for the needed dates and region. Since the region of our data is not so large, we did not see large variations in the weather data within the sensors of the region. So, weather data from a single meteorological sensor is used for analysis. 
+
+## Preliminary EDA and thoughts
+
+A quick look at the time-series data of a chosen sensor shows that the data is quite noisy with significant day to day variations. 
+![time_series_random_sensor](image.png)

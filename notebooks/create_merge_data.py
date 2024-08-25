@@ -27,40 +27,6 @@ ON
 
 with sqlite3.connect('../datasets/dallas.sqlite') as db:
     data = pd.read_sql(query, db)
-    
-data['time_stamp'] = pd.to_datetime(data['time_stamp']) # convert to datetime
-data.set_index('time_stamp', inplace=True)  # set index to time_stamp
-data =  data.sort_index(ascending=True) # sort the data
-
-data.index = data.index.date # change index to date format
-# Merging weather data from noaa to the data from a single sensor
-weather_noaa_data = pd.read_csv('../datasets/Dallas_stations_data.csv')
-
-query = """
-SELECT
-    s.sensor_index,
-    s.name,
-    s.latitude,
-    s.longitude,
-    d.time_stamp,
-    d.humidity_a,
-    d.temperature_a,
-    d.pressure_a,
-    d."pm2.5_atm_a",
-    d."pm2.5_atm_b",
-    d."pm2.5_cf_1_a",
-    d."pm2.5_cf_1_b"
-FROM
-    sensor_table AS s
-JOIN
-    data_table AS d
-ON
-    s.sensor_index = d.sensor_index
-
-"""
-
-with sqlite3.connect('../datasets/dallas.sqlite') as db:
-    data = pd.read_sql(query, db)
 data['time_stamp'] = pd.to_datetime(data['time_stamp'])
 data.set_index('time_stamp', inplace=True)
 data =  data.sort_index(ascending=True)
