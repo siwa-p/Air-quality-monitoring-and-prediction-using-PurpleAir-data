@@ -36,4 +36,6 @@ The weather data were downloaded from [NOAA](https://noaa.gov) for the needed da
 ## Preliminary EDA and thoughts
 
 A quick look at the time-series data of a chosen sensor shows that the data is quite noisy with significant day to day variations. 
+
 ![time_series_random_sensor](image.png)
+
