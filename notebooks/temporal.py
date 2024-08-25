@@ -4,10 +4,10 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBRegressor
 from sklearn.impute import SimpleImputer
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import root_mean_squared_error
 
 def load_data(sensor_chosen):
-    with sqlite3.connect('datasets/dallas.sqlite') as db:
+    with sqlite3.connect('../datasets/dallas.sqlite') as db:
         query = f"""
         SELECT * FROM data_table
         WHERE sensor_index = {sensor_chosen}
@@ -16,7 +16,7 @@ def load_data(sensor_chosen):
     return data_chosen_sensor
 
 def has_data_after_test_period(sensor_chosen, test_period):
-    with sqlite3.connect('datasets/dallas.sqlite') as db:
+    with sqlite3.connect('../datasets/dallas.sqlite') as db:
         query = f"""
         SELECT COUNT(*) FROM data_table
         WHERE sensor_index = {sensor_chosen}
@@ -79,7 +79,7 @@ def evaluate_temporal_model(model, scaler, X_test, y_test):
         y_pred = model.predict(X_test_scaled)
 
         # Evaluate the model
-        mse = mean_squared_error(y_test, y_pred)
+        mse = root_mean_squared_error(y_test, y_pred)
         return y_test, y_pred, mse
 
 if __name__ == "__main__":
@@ -87,7 +87,7 @@ if __name__ == "__main__":
     query = """
     SELECT sensor_index, latitude, longitude FROM sensor_table
     """
-    with sqlite3.connect('datasets/dallas.sqlite') as db:
+    with sqlite3.connect('../datasets/dallas.sqlite') as db:
         sensors = pd.read_sql(query, db)
     
     test_period = '2024-01-08'  # test period starts from this date
@@ -99,7 +99,7 @@ if __name__ == "__main__":
 
         if has_data_after_test_period(sensor_chosen, test_period):
             data_chosen_sensor = load_data(sensor_chosen)
-            preprocessed_data = preprocess_temporal_data(data_chosen_sensor, 'datasets/Dallas_stations_data.csv','USW00003971')
+            preprocessed_data = preprocess_temporal_data(data_chosen_sensor, '../datasets/Dallas_stations_data.csv','USW00003971')
 
             # Perform imputation
             imputer = SimpleImputer()
@@ -136,4 +136,4 @@ if __name__ == "__main__":
             print(f"No data found for sensor {sensor_chosen} after the test period.")
     
     temporal_results = pd.DataFrame(sensor_results)
-    temporal_results.to_csv('datasets/temporal_results.csv', index=False)
+    temporal_results.to_csv('../datasets/temporal_results.csv', index=False)

@@ -5,7 +5,7 @@ from sklearn.neighbors import NearestNeighbors
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from xgboost import XGBRegressor
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.metrics import root_mean_squared_error, mean_absolute_error, r2_score
 from datetime import datetime, timedelta
 
 def calculate_spatial_weights(sensors):
@@ -33,7 +33,7 @@ def calculate_spatial_weights(sensors):
 # method to get train test split for each sensor
 def get_train_test_data_for_sensor(data, sensor_index, spatial_weights):
     # data.set_index('sensor_index', inplace=True)
-    data['pm2.5_atm_a'].fillna(0, inplace=True)
+    data['pm2.5_atm_a'] = data['pm2.5_atm_a'].fillna(0)    
     data['spatial_lag_pm2.5'] = spatial_weights.values @ data['pm2.5_atm_a'].values
     train_data = data[data.index != sensor_index]
     test_data = data[data.index == sensor_index]
@@ -72,7 +72,7 @@ def get_data_all(start_date, end_date):
     """
 
     # Fetch data from the SQLite database
-    with sqlite3.connect('datasets/dallas.sqlite') as db:
+    with sqlite3.connect('../datasets/dallas.sqlite') as db:
         data_d = pd.read_sql(query, db)
 
     data_d = data_d[data_d['pm2.5_atm_a'] < 1000]
@@ -99,7 +99,7 @@ def train_evaluate_xgboost_(X_train, X_test, y_train, y_test):
     
     # Calculate evaluation metrics
     mae = mean_absolute_error(y_test, y_pred)
-    rmse = mean_squared_error(y_test, y_pred, squared=False)
+    rmse = root_mean_squared_error(y_test, y_pred)
     # r2 = r2_score(y_test, y_pred)
     
     return {
@@ -115,7 +115,7 @@ def train_evaluate_xgboost_(X_train, X_test, y_train, y_test):
 query = """
     SELECT * FROM sensor_table
     """
-with sqlite3.connect('datasets/dallas.sqlite') as db:
+with sqlite3.connect('../datasets/dallas.sqlite') as db:
     sensors = pd.read_sql(query, db)
 
 start_date = '2024-01-08'
@@ -137,8 +137,9 @@ while current_date <= end_date:
     ]
     
     date_data = sensors[['sensor_index']].merge(date_data, on='sensor_index', how='left')
-    date_data.set_index('sensor_index', inplace=True)
+    date_data = date_data.set_index('sensor_index')  # Modified to ensure changes are made on the original DataFrame
     date_data = date_data[~date_data.index.duplicated(keep='first')]
+
     for sensor_index in date_data.index.unique():
         sensor_data = date_data[date_data.index == sensor_index]
         if not sensor_data.empty:
@@ -156,6 +157,5 @@ while current_date <= end_date:
                 })
     current_date += timedelta(days=1)
 
-spatial_results = pd.DataFrame(results)
-spatial_results.to_csv('datasets/spatial_results.csv', index=False)
-
+    spatial_results = pd.DataFrame(results)
+    spatial_results.to_csv('../datasets/spatial_results.csv', index=False)
