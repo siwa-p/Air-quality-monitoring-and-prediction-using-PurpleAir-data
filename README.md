@@ -80,7 +80,7 @@ Time series forecasting ignores the spatial dependence of the air quality data. 
 
 We will approach this in two ways:
 
--- A temporal regression [temporal.py](notebooks/temporal.py):
+- A temporal regression [temporal.py](notebooks/temporal.py):
 
     -- Tree based regression with features that correspond to a time series.
 
@@ -88,7 +88,7 @@ We will approach this in two ways:
 
     b. XGBOOST is the choice of regression and produced the best results. The train-test split is performed ahead of time based on time series indexing which prevents data leakage. 
 
--- A spatial regression [spatial.py](notebooks/spatial.py):
+- A spatial regression [spatial.py](notebooks/spatial.py):
 
     -- Tree based regression with features that capture spatial correlation
 
@@ -96,11 +96,23 @@ We will approach this in two ways:
 
     b. Again XGBOOST regressor is used. The model was trained on all the sensors except the one. This was done for all the sensors. These were separate instances of the model. Hence, we do not expect data leakage to occur. 
 
--- Ensemble
+- Ensemble
 
     -- Finally a simple ensemble (prediction averaged of the spatial and temporal) was constructed.
 
 
 ### Neural network
 
+In order to capture both the spatial and time-series nature of the data, we are implementing a 3D convolutional neural network. A group of images (sequential in time) are stacked and fed into a convolutional neural network. An output is generated which is then compared (MSELoss) against the next image in sequence.
+
+The data is a single channel (value of pm2.5) image of some dimensions. These data are stacked in timesteps of 10.
+
+The deep network consists of block with 3D convolution, ReLU layers, batch normalization and skip connections to prevent gradient loss. The model is designed such that the image dimension is unchanged for prediction. (upconvolutions to the rescue)
+
+The data loading and training is presented here [train](notebooks/train_cnn.py). 
+
+- Data generation:
+  - First a spherical earth is assumed and the latitude and longitude are converted into cartesian coordinates. The x and y coordinates are then taken to flatten the space. No projections done. 
+  - Because the sensor locations are sparse with large areas unsampled, Kriging interpolations were performed based on a spherical Variogram model. Here's a sample interpolated image for some point in time. ![Kriging](image-2.png) The regions away from the data points generally have values closer to mean and larger variances. 
+- Once the images are generated, we can feed into the neural network, optimize the hyperparamters and train the model. 
 

@@ -3,10 +3,6 @@ import pandas as pd
 import pickle
 from skgstat import Variogram, OrdinaryKriging
 
-
-
-
-
 def lat_lon_to_cartesian(lat, lon, radius=6371.0):
     x = radius * np.cos(lat) * np.cos(lon)
     y = radius * np.cos(lat) * np.sin(lon)
