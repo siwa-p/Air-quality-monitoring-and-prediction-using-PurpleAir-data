@@ -39,3 +39,68 @@ A quick look at the time-series data of a chosen sensor shows that the data is q
 
 ![time_series_random_sensor](image.png)
 
+### Time series Forecasting
+
+#### Stationary?
+
+ADF test is used to determine the presence of a unit root in a time series data and helps understand if the series is stationary or not.
+
+Null Hypothesis: The series is non-stationary. 
+Based on the result obtained for qute a few randomly chosen sensors: Here's result for one such instance
+
+Results of Dickey-Fuller Test:
+
+| Metric                        | Value          |
+|-------------------------------|----------------|
+| Test Statistic                | -8.192365e+00  |
+| p-value                       | 7.607350e-13   |
+| #Lags Used                    | 0.000000e+00   |
+| Number of Observations Used   | 171.000000e+02 |
+| Critical Value (1%)           | -3.469181e+00  |
+| Critical Value (5%)           | -2.878595e+00  |
+| Critical Value (10%)          | -2.575863e+00  |
+
+The p-value is extremely low. Evidence for time series being stationary. 
+
+#### ARMA model?
+
+A quick look at the correlation in the time series data in the Figure below: ![figure](image-1.png) 
+
+Both PACF and ACF plots show a lag of 1. A lag of 1 in PACF suggests that the future value is mostly determined by value one step behind in the time series (which is a day here). So a AR(1) model is appropriate.
+
+While the lag of 1 in ACF is related to how the errors in the measurements today affects the measurements tomorrow. Hence a MA(1) becomes appropriate. 
+
+With these results, We proceed with an ARIMA model with (1 0 1). We used SARIMAX from statsmodels, which includes in addition to the AR and MA, seasonality as well as exogenous variables from the data. The ARIMA implementation can be found [here](notebooks/arima.py) 
+
+#### Caviats?
+
+Time series forecasting ignores the spatial dependence of the air quality data. The measurements of particulates in air is a local variable. Hence, it's prediction should include the information of the geo-location of the sensor in question
+
+### Tree-based Regression Methods:
+
+We will approach this in two ways:
+
+-- A temporal regression [temporal.py](notebooks/temporal.py):
+
+    -- Tree based regression with features that correspond to a time series.
+
+    a. A lag feature was created for each sensor based on data of the day before. (.shift() method of pandas dataframes are handy)
+
+    b. XGBOOST is the choice of regression and produced the best results. The train-test split is performed ahead of time based on time series indexing which prevents data leakage. 
+
+-- A spatial regression [spatial.py](notebooks/spatial.py):
+
+    -- Tree based regression with features that capture spatial correlation
+
+    a. To generate spatial features, a weight matrix is generated based on inverse distance. Essentially, closer sensors are given larger weights. 
+
+    b. Again XGBOOST regressor is used. The model was trained on all the sensors except the one. This was done for all the sensors. These were separate instances of the model. Hence, we do not expect data leakage to occur. 
+
+-- Ensemble
+
+    -- Finally a simple ensemble (prediction averaged of the spatial and temporal) was constructed.
+
+
+### Neural network
+
+
