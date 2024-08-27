@@ -9,7 +9,7 @@ import os
 import random
 import pickle
 import matplotlib.pyplot as plt
-from skimage.metrics import structural_similarity as ssim
+# from skimage.metrics import structural_similarity as ssim
 
 # # Check if GPU is available
 # if torch.cuda.is_available():
