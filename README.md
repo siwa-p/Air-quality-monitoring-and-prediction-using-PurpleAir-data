@@ -37,7 +37,7 @@ The weather data were downloaded from [NOAA](https://noaa.gov) for the needed da
 
 A quick look at the time-series data of a chosen sensor shows that the data is quite noisy with significant day to day variations. 
 
-![time_series_random_sensor](image.png)
+![time_series_random_sensor](assets/image.png)
 
 ### Time series Forecasting
 
@@ -64,7 +64,7 @@ The p-value is extremely low. Evidence for time series being stationary.
 
 #### ARMA model?
 
-A quick look at the correlation in the time series data in the Figure below: ![figure](image-1.png) 
+A quick look at the correlation in the time series data in the Figure below: ![figure](assets/image-1.png) 
 
 Both PACF and ACF plots show a lag of 1. A lag of 1 in PACF suggests that the future value is mostly determined by value one step behind in the time series (which is a day here). So a AR(1) model is appropriate.
 
@@ -72,7 +72,7 @@ While the lag of 1 in ACF is related to how the errors in the measurements today
 
 With these results, We proceed with an ARIMA model with (1 0 1). We used SARIMAX from statsmodels, which includes in addition to the AR and MA, seasonality as well as exogenous variables from the data. The ARIMA implementation can be found [here](notebooks/arima.py).
 A quick look at the predictions on randomly chosen sensors due to ARIMA as explored in [this](/notebooks/spatio_temporal.ipynb) is shown below.
-![arima_predictions](image-3.png)
+![arima_predictions](assets/image-3.png)
 The RMSE errors are added to the predictions. They are significantly larger than the day-to-day variations in the raw data. However, they do pick up the time-dependence. 
 
 #### Caviat of ARIMA model:
@@ -105,13 +105,13 @@ We will approach this in two ways:
 
     - Predictions due to ensemble method (xgboost for spatial and time-series regressions) are a significant improvement over ARIMA model. These are explored in [this](/notebooks/spatio_temporal.ipynb) notebook. As seen below for a randomly chosen four sensors,
 
-    ![ensemble_predicted](image-4.png).
+    ![ensemble_predicted](assets/image-4.png).
 
     RMSE errors are smaller and the predictions follow the data much closer. 
 
     Here's a distribution of prediction errors for the two methods
 
-    ![scatterplot_predictions](image-5.png)
+    ![scatterplot_predictions](assets/image-5.png)
 
     Both methods underestimate extreme values of observed pm2.5. Ensemble method does a much better job of staying closer to the observed values.
 
@@ -128,9 +128,9 @@ The data loading and training is presented here [train](notebooks/train_cnn.py).
 
 - Data generation:
   - First a spherical earth is assumed and the latitude and longitude are converted into cartesian coordinates. The x and y coordinates are then taken to flatten the space. No projections done. 
-  - Because the sensor locations are sparse with large areas unsampled, Kriging interpolations were performed based on a spherical Variogram model. Here's a sample interpolated image for some point in time. ![Kriging](image-2.png) The regions away from the data points generally have values closer to mean and larger variances. 
+  - Because the sensor locations are sparse with large areas unsampled, Kriging interpolations were performed based on a spherical Variogram model. Here's a sample interpolated image for some point in time. ![Kriging](assets/image-2.png) The regions away from the data points generally have values closer to mean and larger variances. 
 - Once the images are generated, we can feed into the neural network, optimize the hyperparamters and train the model. 
 
-- After training a few of the test images are sampled from the dataloader and their prediction according to the model are presented side by side ![here](cnn_predictions.png).
+- After training a few of the test images are sampled from the dataloader and their prediction according to the model are presented side by side ![here](assets/cnn_predictions.png).
 
   - Looks like the model is learning from the images and can potentially predict values at some locations at some time in future if a series of data prior is available. 
