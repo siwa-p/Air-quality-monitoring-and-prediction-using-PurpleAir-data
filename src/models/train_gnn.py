@@ -18,7 +18,7 @@ LR = 1e-3
 STEP_SIZE = 20
 GAMMA = 0.5
 BATCH_SIZE = 32
-FEATURES = ["pm2_5_atm_a", "humidity_a", "temperature_a", "pressure_a"]
+FEATURES = ["pm25"]
 
 
 def load_sensor_matrix(db_path: str) -> tuple[np.ndarray, np.ndarray]:

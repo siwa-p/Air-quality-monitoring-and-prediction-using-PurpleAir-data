@@ -6,6 +6,10 @@ from sklearn.impute import SimpleImputer
 from sklearn.metrics import root_mean_squared_error
 
 from src.config import DB_PATH, NOAA_STATIONS, ACTIVE_CITY, TEST_PERIOD_START, PM25_OUTLIER_THRESHOLD
+from src.preprocessing.merge_data import load_weather_df
+
+DROP_META = ["sensor_index", "name", "latitude", "longitude",
+             "STATION", "LATITUDE", "LONGITUDE", "ELEVATION"]
 
 
 def load_data(sensor_chosen: int) -> pd.DataFrame:
@@ -26,50 +30,31 @@ def has_data_after_test_period(sensor_chosen: int, test_period: str) -> bool:
 
 def preprocess_temporal_data(
     sensor_data: pd.DataFrame,
-    weather_data_file: str,
-    station_id: str,
+    weather_df: pd.DataFrame,
 ) -> pd.DataFrame:
     sensor_data["time_stamp"] = pd.to_datetime(sensor_data["time_stamp"])
     sensor_data.set_index("time_stamp", inplace=True)
     sensor_data = sensor_data.sort_index()
     sensor_data.index = sensor_data.index.date
 
-    weather = pd.read_csv(weather_data_file)
-    weather_station = weather[weather["STATION"] == station_id][
-        ["DATE", "AWND", "DAPR", "MDPR", "PGTM", "PRCP", "SNOW", "SNWD",
-         "TAVG", "TMAX", "TMIN", "WDF2", "WDF5", "WESD", "WESF", "WSF2",
-         "WSF5", "WT01", "WT02", "WT03", "WT04", "WT05", "WT06", "WT08"]
-    ].copy()
-    weather_station = weather_station.iloc[:-2].fillna(0)
-    weather_station["DATE"] = pd.to_datetime(weather_station["DATE"])
-    weather_station.set_index("DATE", inplace=True)
+    weather_df = weather_df.copy()
+    weather_df.index = pd.to_datetime(weather_df.index).date
 
-    merged = pd.merge(sensor_data, weather_station, left_index=True, right_index=True)
-    merged = merged[merged["pm2_5_atm_a"] < PM25_OUTLIER_THRESHOLD]
+    merged = pd.merge(sensor_data, weather_df, left_index=True, right_index=True)
+    merged = merged[merged["pm25"] < PM25_OUTLIER_THRESHOLD]
 
-    # Lag features
-    merged["pm2_5_lag1"] = merged["pm2_5_atm_a"].shift(1)
-    merged["pm2_5_lag7"] = merged["pm2_5_atm_a"].shift(7)
-    merged["pm2_5_lag14"] = merged["pm2_5_atm_a"].shift(14)
-    merged["pm2_5_lag30"] = merged["pm2_5_atm_a"].shift(30)
+    merged["pm25_lag1"]  = merged["pm25"].shift(1)
+    merged["pm25_lag7"]  = merged["pm25"].shift(7)
+    merged["pm25_lag14"] = merged["pm25"].shift(14)
+    merged["pm25_lag30"] = merged["pm25"].shift(30)
+    merged["pm25_roll7"] = merged["pm25"].rolling(7, min_periods=1).mean()
 
-    # Rolling mean
-    merged["pm2_5_roll7"] = (
-        merged["pm2_5_atm_a"].rolling(7, min_periods=1).mean()
-    )
-
-    # Calendar features — derive from the DatetimeIndex before .date conversion
     dt_index = pd.to_datetime(merged.index)
-    merged["month"] = dt_index.month
+    merged["month"]       = dt_index.month
     merged["week_of_year"] = dt_index.isocalendar().week.values
     merged["day_of_week"] = dt_index.day_of_week
 
-    columns_to_drop = (
-        [c for c in merged.columns if c.endswith("_b")]
-        + ["pm2_5_cf_1_a", "STATION", "LATITUDE", "LONGITUDE", "ELEVATION"]
-    )
-    merged.drop(columns=[c for c in columns_to_drop if c in merged.columns], inplace=True)
-
+    merged.drop(columns=[c for c in DROP_META if c in merged.columns], inplace=True)
     return merged
 
 
@@ -79,9 +64,7 @@ def train_temporal_model(X_train: pd.DataFrame, y_train: pd.Series) -> XGBRegres
     return model
 
 
-def evaluate_temporal_model(
-    model: XGBRegressor, X_test: pd.DataFrame, y_test: pd.Series
-):
+def evaluate_temporal_model(model: XGBRegressor, X_test: pd.DataFrame, y_test: pd.Series):
     if len(X_test) == 0:
         return y_test, np.nan, np.nan
     y_pred = model.predict(X_test)
@@ -90,11 +73,11 @@ def evaluate_temporal_model(
 
 
 if __name__ == "__main__":
-    station_id = NOAA_STATIONS[ACTIVE_CITY]
+    weather_df = load_weather_df()
 
     with duckdb.connect(DB_PATH, read_only=True) as con:
         sensors = con.execute(
-            "SELECT sensor_index, latitude, longitude FROM raw.sensor_table"
+            "SELECT sensor_index, latitude, longitude FROM sensor_table"
         ).df()
 
     sensor_results = []
@@ -105,9 +88,7 @@ if __name__ == "__main__":
             continue
 
         data = load_data(sensor_chosen)
-        processed = preprocess_temporal_data(
-            data, f"datasets/{ACTIVE_CITY}_stations_data.csv", station_id
-        )
+        processed = preprocess_temporal_data(data, weather_df)
 
         imputer = SimpleImputer()
         df_imp = pd.DataFrame(
@@ -117,11 +98,11 @@ if __name__ == "__main__":
         )
 
         train = df_imp[:TEST_PERIOD_START]
-        test = df_imp[TEST_PERIOD_START:]
-        X_train = train.drop(columns=["pm2_5_atm_a"])
-        y_train = train["pm2_5_atm_a"]
-        X_test = test.drop(columns=["pm2_5_atm_a"])
-        y_test = test["pm2_5_atm_a"]
+        test  = df_imp[TEST_PERIOD_START:]
+        X_train = train.drop(columns=["pm25"])
+        y_train = train["pm25"]
+        X_test  = test.drop(columns=["pm25"])
+        y_test  = test["pm25"]
 
         if len(X_train) == 0:
             print(f"No training samples for sensor {sensor_chosen}")
@@ -132,9 +113,9 @@ if __name__ == "__main__":
 
         sensor_results.append({
             "Sensor Index": sensor_chosen,
-            "Latitude": row["latitude"],
+            "Latitude":  row["latitude"],
             "Longitude": row["longitude"],
-            "RMSE": rmse,
+            "RMSE":  rmse,
             "y_test": y_test.tolist(),
             "y_pred": y_pred.tolist() if not isinstance(y_pred, float) else np.nan,
         })

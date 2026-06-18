@@ -4,10 +4,7 @@ from statsmodels.tsa.statespace.sarimax import SARIMAX
 
 from src.config import TEST_PERIOD_START
 
-DROP_COLS = [
-    "pm2_5_atm_b", "pm2_5_cf_1_a", "pm2_5_cf_1_b",
-    "name", "latitude", "longitude", "STATION", "LATITUDE", "LONGITUDE", "ELEVATION",
-]
+DROP_COLS = ["name", "latitude", "longitude", "STATION", "LATITUDE", "LONGITUDE", "ELEVATION"]
 
 
 def run_arima(merged_csv: str = "datasets/merged_data.csv",
@@ -33,10 +30,10 @@ def run_arima(merged_csv: str = "datasets/merged_data.csv",
             print(f"Insufficient data for sensor {sensor_index}")
             continue
 
-        drop_existing = [c for c in DROP_COLS if c in sensor_data.columns]
-        y = train_data["pm2_5_atm_a"]
-        X = train_data.drop(columns=["pm2_5_atm_a", "sensor_index"] + drop_existing)
-        X_test = test_data.drop(columns=["pm2_5_atm_a", "sensor_index"] + drop_existing)
+        drop_existing = [c for c in DROP_COLS + ["sensor_index"] if c in sensor_data.columns]
+        y = train_data["pm25"]
+        X = train_data.drop(columns=["pm25"] + drop_existing)
+        X_test = test_data.drop(columns=["pm25"] + drop_existing)
 
         X.replace([np.inf, -np.inf], np.nan, inplace=True)
         X_test.replace([np.inf, -np.inf], np.nan, inplace=True)
@@ -68,7 +65,7 @@ def run_arima(merged_csv: str = "datasets/merged_data.csv",
                 "Sensor Index": sensor_index,
                 "Latitude": latitude,
                 "Longitude": longitude,
-                "y_test": test_data["pm2_5_atm_a"].tolist(),
+                "y_test": test_data["pm25"].tolist(),
                 "y_pred": predictions.tolist() if not isinstance(predictions, float) else np.nan,
             })
         except Exception as e:

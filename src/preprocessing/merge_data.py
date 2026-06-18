@@ -1,67 +1,66 @@
 import duckdb
 import pandas as pd
 
-from src.config import DB_PATH, NOAA_STATIONS, ACTIVE_CITY, TEST_PERIOD_START, PM25_OUTLIER_THRESHOLD
-
-WEATHER_COLS = [
-    "DATE", "AWND", "DAPR", "MDPR", "PGTM", "PRCP", "SNOW", "SNWD",
-    "TAVG", "TMAX", "TMIN", "WDF2", "WDF5", "WESD", "WESF",
-    "WSF2", "WSF5", "WT01", "WT02", "WT03", "WT04", "WT05", "WT06", "WT08",
-]
+from src.config import DB_PATH, NOAA_STATIONS, ACTIVE_CITY, PM25_OUTLIER_THRESHOLD
 
 
-def load_weather(weather_csv: str, station_id: str) -> pd.DataFrame:
-    """Load and clean NOAA weather data for one station; returns date-indexed DataFrame."""
-    weather = pd.read_csv(weather_csv)
-    w = weather[weather["STATION"] == station_id][["STATION"] + WEATHER_COLS].copy()
-    w = w.iloc[:-2].fillna(0)
-    w["DATE"] = pd.to_datetime(w["DATE"])
-    w.set_index("DATE", inplace=True)
-    return w
+def load_weather_df(station_id: str = None) -> pd.DataFrame:
+    """Return weather data from DuckDB as a date-indexed DataFrame."""
+    if station_id is None:
+        station_id = NOAA_STATIONS[ACTIVE_CITY]
+    with duckdb.connect(DB_PATH, read_only=True) as con:
+        df = con.execute(
+            "SELECT * FROM raw.weather_daily WHERE station = ?", [station_id]
+        ).df()
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.set_index("date").drop(columns=["station"]).fillna(0)
+    return df
 
 
 def build_merged_csv(
-    weather_csv: str,
     output_csv: str = "datasets/merged_data.csv",
     start_date: str = "2022-04-01",
     end_date: str = None,
 ) -> pd.DataFrame:
     station_id = NOAA_STATIONS[ACTIVE_CITY]
+    date_filter = f"AND d.time_stamp::DATE >= '{start_date}'"
+    if end_date:
+        date_filter += f" AND d.time_stamp::DATE <= '{end_date}'"
+
+    query = f"""
+        SELECT
+            s.sensor_index, s.name, s.latitude, s.longitude,
+            d.time_stamp,
+            d.pm25,
+            w.AWND, w.DAPR, w.MDPR, w.PGTM,
+            w.PRCP, w.SNOW, w.SNWD,
+            w.TAVG, w.TMAX, w.TMIN,
+            w.WDF2, w.WDF5, w.WESD, w.WESF, w.WSF2, w.WSF5,
+            w.WT01, w.WT02, w.WT03, w.WT04, w.WT05, w.WT06, w.WT08
+        FROM sensor_table AS s
+        JOIN raw.data_daily AS d ON s.sensor_index = d.sensor_index
+        LEFT JOIN raw.weather_daily AS w
+            ON d.time_stamp::DATE = w.date AND w.station = '{station_id}'
+        WHERE d.pm25 < {PM25_OUTLIER_THRESHOLD}
+        {date_filter}
+        ORDER BY d.time_stamp, s.sensor_index
+    """
 
     with duckdb.connect(DB_PATH, read_only=True) as con:
-        data = con.execute("""
-            SELECT
-                s.sensor_index, s.name, s.latitude, s.longitude,
-                d.time_stamp,
-                d.humidity_a, d.temperature_a, d.pressure_a,
-                d.pm2_5_atm_a, d.pm2_5_atm_b, d.pm2_5_cf_1_a, d.pm2_5_cf_1_b
-            FROM sensor_table AS s
-            JOIN raw.data_daily AS d ON s.sensor_index = d.sensor_index
-        """).df()
+        merged = con.execute(query).df()
 
-    data["time_stamp"] = pd.to_datetime(data["time_stamp"])
-    data.set_index("time_stamp", inplace=True)
-    data = data.sort_index()
-    data.index = data.index.date
+    merged["time_stamp"] = pd.to_datetime(merged["time_stamp"]).dt.date
+    merged.fillna({
+        "AWND": 0, "PRCP": 0, "SNOW": 0, "SNWD": 0, "TAVG": 0,
+        "TMAX": 0, "TMIN": 0, "WDF2": 0, "WDF5": 0, "WSF2": 0,
+        "WSF5": 0, "WT01": 0, "WT02": 0, "WT03": 0, "WT04": 0,
+        "WT05": 0, "WT06": 0, "WT08": 0,
+    }, inplace=True)
 
-    weather = load_weather(weather_csv, station_id)
-    weather.index = weather.index.date
-
-    merged = data.join(weather, how="left")
-    merged = merged[(merged.index >= pd.to_datetime(start_date).date())]
-    if end_date:
-        merged = merged[merged.index <= pd.to_datetime(end_date).date()]
-
-    merged = merged[merged["pm2_5_atm_a"] < PM25_OUTLIER_THRESHOLD]
-    merged = merged.reset_index().rename(columns={"index": "time_stamp"})
     merged.to_csv(output_csv, index=False)
     print(f"Saved {len(merged)} rows to {output_csv}")
     return merged
 
 
 if __name__ == "__main__":
-    build_merged_csv(
-        weather_csv=f"datasets/{ACTIVE_CITY}_stations_data.csv",
-        output_csv="datasets/merged_data.csv",
-        start_date="2022-04-01",
-    )
+    build_merged_csv(output_csv="datasets/merged_data.csv", start_date="2022-04-01")

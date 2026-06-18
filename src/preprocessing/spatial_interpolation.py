@@ -15,7 +15,7 @@ def create_spatial_map(data: pd.DataFrame, timestamp):
     sample = data[data["time_stamp"] == timestamp]
     lat = np.radians(sample["latitude"].values)
     lon = np.radians(sample["longitude"].values)
-    values = sample["pm2_5_atm_a"].values
+    values = sample["pm25"].values
     cartesian = np.array([lat_lon_to_cartesian(la, lo) for la, lo in zip(lat, lon)])
     return cartesian[:, :2], values
 
@@ -26,8 +26,8 @@ def run_interpolation(
     output_errors: str = "datasets/processed_data_errors.pkl",
 ):
     data = pd.read_csv(input_csv)
-    data = data[(data["pm2_5_atm_a"] < 50) & (data["pm2_5_atm_b"] < 50)]
-    data = data.dropna(subset=["latitude", "longitude", "pm2_5_atm_a"])
+    data = data[data["pm25"] < 50]
+    data = data.dropna(subset=["latitude", "longitude", "pm25"])
 
     timestamps = data["time_stamp"].unique()
     processed_values = []
