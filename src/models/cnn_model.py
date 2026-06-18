@@ -45,8 +45,12 @@ class CNN(nn.Module):
         self.Conv2d = nn.Conv2d(1, 1, kernel_size=3, stride=1, padding=1)
         
     def forward(self, x):
-        residual = x 
+        residual = x
         x = self.cnn(x)
-        x = x + residual  # Skip connection
+        assert x.shape == residual.shape, (
+            f"Skip connection shape mismatch: decoder output {x.shape} != input {residual.shape}. "
+            "Adjust ConvTranspose3d output_padding to match."
+        )
+        x = x + residual
         x = x[:, :, -1, :, :]  # Selecting the last time step
         return self.Conv2d(x)

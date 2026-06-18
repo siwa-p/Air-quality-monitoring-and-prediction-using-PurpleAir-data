@@ -163,3 +163,10 @@ cython_debug/
 /datasets
 
 *.json
+
+*CLAUDE.md
+
+*tests/
+
+*plan.md
+
