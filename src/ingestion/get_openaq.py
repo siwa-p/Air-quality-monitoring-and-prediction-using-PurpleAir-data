@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from dotenv import load_dotenv
 from loguru import logger
 
-from src.config import DB_PATH, BOUNDING_BOXES, ACTIVE_CITY
+from src.config import DB_PATH, BOUNDING_BOXES, ACTIVE_CITY, DAILY_START
 
 load_dotenv()
 TOKEN = os.getenv("OPENAQ_API_KEY")
@@ -30,15 +30,6 @@ CREATE TABLE IF NOT EXISTS sensor_table (
 
 DATA_DAILY_SQL = """
 CREATE TABLE IF NOT EXISTS raw.data_daily (
-    time_stamp    TIMESTAMP,
-    sensor_index  INTEGER,
-    pm25          DOUBLE,
-    PRIMARY KEY (sensor_index, time_stamp)
-)
-"""
-
-DATA_HOURLY_SQL = """
-CREATE TABLE IF NOT EXISTS raw.data_hourly (
     time_stamp    TIMESTAMP,
     sensor_index  INTEGER,
     pm25          DOUBLE,
@@ -155,8 +146,10 @@ def _parse_rows(records: list[dict], sensor_id: int) -> list[dict]:
         ts = dt_from.get("utc")
         if ts is None or r.get("value") is None:
             continue
+        ts_parsed = pd.Timestamp(ts)
         rows.append({
-            "time_stamp": pd.Timestamp(ts).tz_localize(None) if pd.Timestamp(ts).tzinfo is None else pd.Timestamp(ts).tz_convert("UTC").tz_localize(None),
+            "time_stamp": ts_parsed.tz_localize(None) if ts_parsed.tzinfo is None
+                          else ts_parsed.tz_convert("UTC").tz_localize(None),
             "sensor_index": sensor_id,
             "pm25": r["value"],
         })
@@ -164,6 +157,7 @@ def _parse_rows(records: list[dict], sensor_id: int) -> list[dict]:
 
 
 def ingest_daily(start_date: str, end_date: str, con: duckdb.DuckDBPyConnection):
+    """Fetch daily data for sensors not yet in the warehouse."""
     sensor_ids = con.execute("SELECT sensor_index FROM sensor_table").df()["sensor_index"].tolist()
     already_done = set(
         con.execute("SELECT DISTINCT sensor_index FROM raw.data_daily").df()["sensor_index"].tolist()
@@ -192,42 +186,64 @@ def ingest_daily(start_date: str, end_date: str, con: duckdb.DuckDBPyConnection)
         time.sleep(SLEEP)
 
 
-def ingest_hourly(start_date: str, end_date: str, con: duckdb.DuckDBPyConnection):
+def backfill_daily(backfill_start: str, con: duckdb.DuckDBPyConnection):
+    """Fill the gap from backfill_start up to the earliest date already in the warehouse.
+
+    Skips sensors that already have data before the current warehouse start.
+    Safe to re-run — INSERT OR IGNORE prevents duplicates.
+    """
     sensor_ids = con.execute("SELECT sensor_index FROM sensor_table").df()["sensor_index"].tolist()
-    already_done = set(
-        con.execute("SELECT DISTINCT sensor_index FROM raw.data_hourly").df()["sensor_index"].tolist()
+
+    # find the earliest timestamp currently in the warehouse
+    row = con.execute("SELECT MIN(time_stamp) FROM raw.data_daily").fetchone()
+    if not row or row[0] is None:
+        logger.info("No existing daily data — nothing to backfill (run ingest_daily first)")
+        return
+
+    existing_start = pd.Timestamp(row[0]).date()
+    backfill_end = (existing_start - timedelta(days=1)).isoformat()
+
+    if backfill_start >= backfill_end:
+        logger.info(f"Backfill window empty ({backfill_start} → {backfill_end}), nothing to do")
+        return
+
+    # skip sensors that already have data before the warehouse start
+    already_backfilled = set(
+        con.execute(
+            f"SELECT DISTINCT sensor_index FROM raw.data_daily WHERE time_stamp < '{existing_start}'"
+        ).df()["sensor_index"].tolist()
     )
-    todo = [s for s in sensor_ids if s not in already_done]
+    todo = [s for s in sensor_ids if s not in already_backfilled]
     logger.info(
-        f"Fetching hourly data for {len(sensor_ids)} sensors ({start_date} → {end_date})"
-        f" — {len(already_done)} already ingested, {len(todo)} remaining"
+        f"Backfill {backfill_start} → {backfill_end}: "
+        f"{len(todo)} sensors to fetch, {len(already_backfilled)} already done"
     )
 
     for sensor_id in todo:
         try:
-            records = _fetch_chunked(f"/sensors/{sensor_id}/hours", start_date, end_date)
+            records = _fetch_chunked(
+                f"/sensors/{sensor_id}/measurements/daily", backfill_start, backfill_end
+            )
         except requests.HTTPError:
-            logger.exception(f"Sensor {sensor_id}: skipping hourly due to HTTP error")
+            logger.exception(f"Sensor {sensor_id}: skipping backfill due to HTTP error")
             continue
 
         rows = _parse_rows(records, sensor_id)
         if not rows:
-            logger.info(f"Sensor {sensor_id}: no hourly data")
+            logger.info(f"Sensor {sensor_id}: no data found in backfill window")
             continue
 
         df = pd.DataFrame(rows).drop_duplicates(subset=["sensor_index", "time_stamp"])
-        con.execute("INSERT OR IGNORE INTO raw.data_hourly SELECT * FROM df")
-        logger.info(f"Sensor {sensor_id}: stored {len(df)} hourly rows")
+        con.execute("INSERT OR IGNORE INTO raw.data_daily SELECT * FROM df")
+        logger.info(f"Sensor {sensor_id}: backfilled {len(df)} rows ({backfill_start} → {backfill_end})")
         time.sleep(SLEEP)
 
 
 def main():
     bbox = BOUNDING_BOXES[ACTIVE_CITY]
-    daily_start = "2022-04-01"
-    hourly_start = "2023-01-01"
     end_date = date.today().isoformat()
 
-    logger.info(f"OpenAQ ingestion for {ACTIVE_CITY}")
+    logger.info(f"OpenAQ ingestion for {ACTIVE_CITY} ({DAILY_START} → {end_date})")
 
     sensors = discover_sensors(bbox)
     if not sensors:
@@ -238,14 +254,13 @@ def main():
         con.execute("CREATE SCHEMA IF NOT EXISTS raw")
         con.execute(SENSOR_TABLE_SQL)
         con.execute(DATA_DAILY_SQL)
-        con.execute(DATA_HOURLY_SQL)
 
         df_sensors = pd.DataFrame(sensors)
         con.execute("INSERT OR REPLACE INTO sensor_table SELECT * FROM df_sensors")
         logger.info(f"Stored {len(sensors)} sensors")
 
-        ingest_daily(daily_start, end_date, con)
-        ingest_hourly(hourly_start, end_date, con)
+        ingest_daily(DAILY_START, end_date, con)
+        backfill_daily(DAILY_START, con)
 
     logger.info("OpenAQ ingestion complete")
 

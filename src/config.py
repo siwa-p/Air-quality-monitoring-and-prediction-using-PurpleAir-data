@@ -18,5 +18,6 @@ ACTIVE_CITY = "los_angeles"
 # Excludes Lancaster, Victorville, Riverside (meteorologically distinct from basin).
 SPATIAL_BBOX = dict(lon_min=-118.7, lat_min=33.7, lon_max=-117.8, lat_max=34.4)
 
+DAILY_START = "2018-01-01"   # earliest date to fetch for daily sensor data
 TEST_PERIOD_START = "2024-01-08"
 PM25_OUTLIER_THRESHOLD = 200
