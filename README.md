@@ -108,28 +108,44 @@ The primary neural network model is `STGNN` ([gnn_model.py](src/models/gnn_model
 
 **Architecture:**
 
-- **Graph Attention Network (GATConv)** applied independently at each timestep for spatial message-passing between neighboring sensors.
-- **GRU** unrolled across T timesteps to learn temporal dynamics.
-- A linear output head producing the next-day PM2.5 per sensor node.
+- **Graph Attention Network (GATConv, `edge_dim=1`)** applied independently at each timestep for spatial message-passing. Inverse-distance edge weights are passed as edge attributes, biasing attention toward closer sensors.
+- **LayerNorm** applied to GAT outputs before the recurrent stage to stabilise activation scale.
+- **Stacked GRU (2 layers)** unrolled across T timesteps to learn temporal dynamics.
+- A linear output head producing the next **H=3 days** of PM2.5 per sensor node.
 
-**Inputs** (`[T=7, N=12, F=7]`):
+**Inputs** (`[T=7, N, F=12]`):
 
-| Feature index | Source |
+| Feature indices | Source |
 | --- | --- |
-| 0 | PM2.5 (EMA-smoothed, forward-filled per sensor) |
-| 1–4 | NOAA weather: AWND, TMAX, TMIN, PRCP (broadcast to all nodes) |
-| 5–6 | Calendar: day_of_week, month (broadcast to all nodes) |
+| 0 | PM2.5 (EMA-smoothed span=7, forward-filled per sensor) |
+| 1–3 | PM2.5 lags: t−2, t−7, t−14 (explicit autocorrelation signal) |
+| 4–7 | NOAA weather: AWND, TMAX, TMIN, PRCP (broadcast to all nodes) |
+| 8–11 | Calendar: sin/cos day-of-week, sin/cos month (cyclical encoding) |
 
-The sensor graph is built once from lat/lon coordinates via k-NN (k=5) with inverse-distance edge weights ([build_graph.py](src/preprocessing/build_graph.py)).
+**Sensor graph** ([build_graph.py](src/preprocessing/build_graph.py)):
 
-**Training:**
+Built once from lat/lon coordinates using k-NN (k=5, haversine distance via `ball_tree`). Edges are **bidirectional** with inverse-distance weights normalised to [0, 1]. Haversine is used instead of Euclidean to avoid ~25% East-West distortion on raw degree coordinates.
 
-- Z-score normalisation computed from the training split only to prevent leakage. Stats saved to `datasets/gnn_norm_stats.npz` for use at inference.
-- AdamW optimiser with StepLR scheduler (step_size=10, gamma=0.5). MSELoss, 30 epochs, last 60 windows held out for validation. Trained on GPU (CUDA, RTX 3060).
+**Training** ([train_gnn.py](src/models/train_gnn.py)):
+
+- Three-way split: train / val (60 days) / test (60 days). Z-score stats computed from training only; saved to `datasets/gnn_norm_stats.npz`.
+- AdamW + `ReduceLROnPlateau` (patience=5, factor=0.5). Early stopping at patience=10. Gradient clipping at 1.0.
+- Persistence baseline (predict last known value for all 3 horizon steps) logged before training as a sanity check.
+- Per-horizon RMSE reported at test time (Day+1, Day+2, Day+3 separately).
+
+**Hyperparameter tuning** ([tune_gnn.py](src/models/tune_gnn.py)):
+
+Optuna TPE sampler with `MedianPruner`. Searches over: `lr`, `hidden`, `heads`, `dropout`, `window`, `k`, `batch_size`, `gru_layers`. Best params saved to `datasets/gnn_best_params.json`.
+
+```
+uv run python -m src.models.tune_gnn
+uv run python -m src.models.train_gnn
+```
 
 | | 3D CNN | STGNN |
 | --- | --- | --- |
 | Input | Kriging-interpolated 100×100 grids | Raw sensor readings |
-| Spatial assumption | Translational invariance | Learned per-edge attention |
-| Temporal model | 3D conv (non-causal) | GRU (causal) |
+| Spatial model | Translational conv | Learned per-edge attention (GAT) |
+| Temporal model | 3D conv (non-causal) | Stacked GRU (causal) |
+| Prediction horizon | Next frame | Next 3 days |
 | Preprocessing | Kriging — hours | k-NN graph — seconds |
