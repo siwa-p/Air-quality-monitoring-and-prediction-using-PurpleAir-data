@@ -108,8 +108,18 @@ def train_gnn():
         weather[:, np.newaxis, :], (T, N, F_w)
     ).copy().astype(np.float32)
 
-    # Combined matrix: [T, N, 1 + F_w]
-    matrix = np.concatenate([pm25_matrix, weather_broadcast], axis=2)
+    # Calendar features: day_of_week [0-6] and month [1-12] — same for all nodes
+    dates_dt = pd.DatetimeIndex(dates)
+    calendar = np.stack([
+        dates_dt.dayofweek.astype(np.float32),
+        dates_dt.month.astype(np.float32),
+    ], axis=1)  # [T, 2]
+    calendar_broadcast = np.broadcast_to(
+        calendar[:, np.newaxis, :], (T, N, 2)
+    ).copy().astype(np.float32)
+
+    # Combined matrix: [T, N, 1 + F_w + 2]
+    matrix = np.concatenate([pm25_matrix, weather_broadcast, calendar_broadcast], axis=2)
     F = matrix.shape[2]
 
     # --- Graph ---
@@ -155,6 +165,7 @@ def train_gnn():
     scheduler = StepLR(optimizer, step_size=STEP_SIZE, gamma=GAMMA)
 
     # --- Training loop ---
+    best_val = float("inf")
     for epoch in range(N_EPOCHS):
         model.train()
         indices    = torch.randperm(len(X_train))
@@ -167,9 +178,7 @@ def train_gnn():
             yb = y_train[batch_idx]   # [B, N]
 
             optimizer.zero_grad()
-            preds = torch.stack([
-                model(xb[i], edge_index).squeeze(-1) for i in range(len(xb))
-            ])
+            preds = model(xb, edge_index).squeeze(-1)  # [B, N]
             loss = criterion(preds, yb)
             loss.backward()
             optimizer.step()
@@ -178,20 +187,26 @@ def train_gnn():
 
         model.eval()
         with torch.no_grad():
-            val_preds = torch.stack([
-                model(X_val[i], edge_index).squeeze(-1) for i in range(len(X_val))
-            ])
+            val_preds = model(X_val, edge_index).squeeze(-1)  # [V, N]
             val_loss = criterion(val_preds, y_val).item()
 
-        logger.info(
-            f"Epoch {epoch+1}/{N_EPOCHS}  "
-            f"Train Loss: {epoch_loss/n_batches:.4f}  "
-            f"Val Loss: {val_loss:.4f}"
-        )
+        if val_loss < best_val:
+            best_val = val_loss
+            torch.save(model.state_dict(), "datasets/gnn_model.pth")
+            logger.info(
+                f"Epoch {epoch+1}/{N_EPOCHS}  "
+                f"Train Loss: {epoch_loss/n_batches:.4f}  "
+                f"Val Loss: {val_loss:.4f}  ↓ best — saved"
+            )
+        else:
+            logger.info(
+                f"Epoch {epoch+1}/{N_EPOCHS}  "
+                f"Train Loss: {epoch_loss/n_batches:.4f}  "
+                f"Val Loss: {val_loss:.4f}"
+            )
         scheduler.step()
 
-    torch.save(model.state_dict(), "datasets/gnn_model.pth")
-    logger.info("Saved datasets/gnn_model.pth")
+    logger.info(f"Training complete. Best val loss: {best_val:.4f}")
 
 
 if __name__ == "__main__":

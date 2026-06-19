@@ -38,24 +38,6 @@ def calculate_spatial_weights(sensors: pd.DataFrame) -> pd.DataFrame:
     return spatial_weights
 
 
-def get_train_test_data_for_sensor(
-    data: pd.DataFrame, sensor_index: int, spatial_weights: pd.DataFrame
-):
-    data = data.copy()
-    data["pm25"] = data["pm25"].fillna(0)
-    data["spatial_lag_pm25"] = spatial_weights.values @ data["pm25"].values
-
-    train_data = data[data.index != sensor_index]
-    test_data  = data[data.index == sensor_index]
-
-    feature_cols = [c for c in SPATIAL_FEATURES if c in data.columns and data[c].notna().any()]
-    X_train = train_data[feature_cols]
-    y_train = train_data["pm25"]
-    X_test  = test_data[feature_cols]
-    y_test  = test_data["pm25"]
-
-    return X_train, X_test, y_train, y_test
-
 
 def get_data_all(start_date: str, end_date: str) -> pd.DataFrame:
     query = f"""

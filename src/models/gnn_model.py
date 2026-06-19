@@ -21,20 +21,28 @@ class STGNN(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor, edge_index: torch.Tensor, edge_weight=None):
-        T, N, F = x.shape
+        # Accept [T, N, F] (single) or [B, T, N, F] (batched)
+        squeeze = x.dim() == 3
+        if squeeze:
+            x = x.unsqueeze(0)
+
+        B, T, N, F_in = x.shape
+        E = edge_index.shape[1]
+
+        # Shift edge indices by i*N for each graph in the batch
+        offsets = torch.arange(B, device=edge_index.device).view(B, 1, 1) * N  # [B,1,1]
+        batch_edge = (edge_index.unsqueeze(0).expand(B, -1, -1) + offsets).reshape(2, B * E)
+
         gat_outs = []
         for t in range(T):
-            node_feat = x[t]                    # [N, F]
-            out = self.gat(node_feat, edge_index)  # [N, heads*hidden]
+            node_feat = x[:, t].reshape(B * N, F_in)     # [B*N, F]
+            out = self.gat(node_feat, batch_edge)          # [B*N, heads*hidden]
             gat_outs.append(out)
 
-        # Stack: [T, N, heads*hidden]
-        seq = torch.stack(gat_outs, dim=0)
-        seq = self.dropout(seq)
-
-        # GRU: input [T, N, hidden*heads] → output [T, N, hidden]
+        # [T, B*N, heads*hidden] → GRU → [T, B*N, hidden]
+        seq = self.dropout(torch.stack(gat_outs, dim=0))
         gru_out, _ = self.gru(seq)
 
-        # Take last timestep: [N, hidden]
-        last = gru_out[-1]
-        return self.head(last)  # [N, 1]
+        last = gru_out[-1].view(B, N, -1)  # [B, N, hidden]
+        out = self.head(last)               # [B, N, 1]
+        return out.squeeze(0) if squeeze else out

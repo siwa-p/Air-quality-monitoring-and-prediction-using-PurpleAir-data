@@ -165,9 +165,16 @@ def _parse_rows(records: list[dict], sensor_id: int) -> list[dict]:
 
 def ingest_daily(start_date: str, end_date: str, con: duckdb.DuckDBPyConnection):
     sensor_ids = con.execute("SELECT sensor_index FROM sensor_table").df()["sensor_index"].tolist()
-    logger.info(f"Fetching daily data for {len(sensor_ids)} sensors ({start_date} → {end_date})")
+    already_done = set(
+        con.execute("SELECT DISTINCT sensor_index FROM raw.data_daily").df()["sensor_index"].tolist()
+    )
+    todo = [s for s in sensor_ids if s not in already_done]
+    logger.info(
+        f"Fetching daily data for {len(sensor_ids)} sensors ({start_date} → {end_date})"
+        f" — {len(already_done)} already ingested, {len(todo)} remaining"
+    )
 
-    for sensor_id in sensor_ids:
+    for sensor_id in todo:
         try:
             records = _fetch_chunked(f"/sensors/{sensor_id}/measurements/daily", start_date, end_date)
         except requests.HTTPError:
@@ -187,9 +194,16 @@ def ingest_daily(start_date: str, end_date: str, con: duckdb.DuckDBPyConnection)
 
 def ingest_hourly(start_date: str, end_date: str, con: duckdb.DuckDBPyConnection):
     sensor_ids = con.execute("SELECT sensor_index FROM sensor_table").df()["sensor_index"].tolist()
-    logger.info(f"Fetching hourly data for {len(sensor_ids)} sensors ({start_date} → {end_date})")
+    already_done = set(
+        con.execute("SELECT DISTINCT sensor_index FROM raw.data_hourly").df()["sensor_index"].tolist()
+    )
+    todo = [s for s in sensor_ids if s not in already_done]
+    logger.info(
+        f"Fetching hourly data for {len(sensor_ids)} sensors ({start_date} → {end_date})"
+        f" — {len(already_done)} already ingested, {len(todo)} remaining"
+    )
 
-    for sensor_id in sensor_ids:
+    for sensor_id in todo:
         try:
             records = _fetch_chunked(f"/sensors/{sensor_id}/hours", start_date, end_date)
         except requests.HTTPError:

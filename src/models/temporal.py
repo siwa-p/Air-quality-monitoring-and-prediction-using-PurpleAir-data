@@ -124,14 +124,19 @@ if __name__ == "__main__":
         model = train_temporal_model(X_train, y_train)
         y_test, y_pred, rmse = evaluate_temporal_model(model, X_test, y_test)
 
-        sensor_results.append({
-            "Sensor Index": sensor_chosen,
-            "Latitude":  row["latitude"],
-            "Longitude": row["longitude"],
-            "RMSE":  rmse,
-            "y_test": y_test.tolist(),
-            "y_pred": y_pred.tolist() if not isinstance(y_pred, float) else np.nan,
-        })
+        if isinstance(y_pred, float):  # np.nan returned for empty test set
+            continue
+
+        print(f"  Sensor {sensor_chosen}: RMSE = {rmse:.2f} µg/m³ ({len(y_test)} test days)")
+        for date, actual, pred in zip(y_test.index, y_test.values, y_pred):
+            sensor_results.append({
+                "Date":         date.date(),
+                "Sensor Index": sensor_chosen,
+                "Latitude":     row["latitude"],
+                "Longitude":    row["longitude"],
+                "Y Test":       actual,
+                "Y Pred":       pred,
+            })
 
     pd.DataFrame(sensor_results).to_csv("datasets/temporal_results.csv", index=False)
-    print(f"Saved {len(sensor_results)} sensor results to datasets/temporal_results.csv")
+    print(f"Saved {len(sensor_results)} rows to datasets/temporal_results.csv")

@@ -63,18 +63,25 @@ def run_arima(merged_csv: str = "datasets/merged_data.csv",
                 exog=X_test,
             )
             if predictions.isna().any():
-                predictions = np.nan
-
-            sensor_results.append({
-                "Sensor Index": sensor_index,
-                "Latitude": latitude,
-                "Longitude": longitude,
-                "y_test": test_data["pm25"].tolist(),
-                "y_pred": predictions.tolist() if not isinstance(predictions, float) else np.nan,
-            })
+                print(f"Predictions contain NaN for sensor {sensor_index}, skipping.")
+                continue
         except Exception as e:
             print(f"Prediction failed for sensor {sensor_index}: {e}")
             continue
+
+        for date, actual, pred in zip(
+            test_data.index.to_timestamp(),
+            test_data["pm25"].values,
+            predictions.values,
+        ):
+            sensor_results.append({
+                "Date":         date.date(),
+                "Sensor Index": sensor_index,
+                "Latitude":     latitude,
+                "Longitude":    longitude,
+                "Y Test":       actual,
+                "Y Pred":       float(pred),
+            })
 
     results_df = pd.DataFrame(sensor_results)
     results_df.to_csv(output_csv, index=False)
