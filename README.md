@@ -134,3 +134,6 @@ The data loading and training is presented here [train](notebooks/train_cnn.py).
 - After training a few of the test images are sampled from the dataloader and their prediction according to the model are presented side by side ![here](assets/cnn_predictions.png).
 
   - Looks like the model is learning from the images and can potentially predict values at some locations at some time in future if a series of data prior is available. 
+
+
+cd "c:\Users\prasi\Documents\Air-quality-monitoring-and-prediction-using-PurpleAir-data" && uv pip install torch --extra-index-url https://download.pytorch.org/whl/cu126 --force-reinstall 2>&1 | tail -5

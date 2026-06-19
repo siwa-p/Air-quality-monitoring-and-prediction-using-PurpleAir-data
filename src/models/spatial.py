@@ -10,6 +10,7 @@ from xgboost import XGBRegressor
 
 from src.config import DB_PATH, NOAA_STATIONS, ACTIVE_CITY, TEST_PERIOD_START, PM25_OUTLIER_THRESHOLD
 from src.preprocessing.merge_data import load_weather_df
+from src.preprocessing.sensor_filter import apply_ema_filter
 
 WEATHER_FEATURES = ["AWND", "PRCP", "SNOW", "TMAX", "TMIN", "WSF2", "WDF2"]
 SPATIAL_FEATURES = ["spatial_lag_pm25"] + WEATHER_FEATURES
@@ -106,40 +107,73 @@ if __name__ == "__main__":
     weather_df = load_weather_df()
 
     end_date = datetime.now().strftime("%Y-%m-%d")
-    data_d = get_data_all(TEST_PERIOD_START, end_date)
-    data_d = merge_weather(data_d, weather_df)
+    data_all = get_data_all("2022-04-01", end_date)
+    data_all = data_all.sort_index()
 
+    # Apply EMA smoothing per sensor before modelling
+    data_reset = data_all.reset_index()
+    # Index name is lost when assigning date objects; restore it
+    if "time_stamp" not in data_reset.columns:
+        data_reset = data_reset.rename(columns={"index": "time_stamp"})
+    data_reset = apply_ema_filter(data_reset, "pm25", span=7)
+    data_reset["pm25"] = data_reset["pm25_ema"]
+    data_all = data_reset.drop(columns=["pm25_ema"]).set_index("time_stamp")
+
+    data_all = merge_weather(data_all, weather_df)
+
+    # Vectorized spatial lag: pivot to (date × sensor), multiply once for all dates
+    pm25_wide = data_all.pivot_table(
+        index=data_all.index, columns="sensor_index", values="pm25", aggfunc="first"
+    )
+    sensor_order = spatial_weights.index.tolist()
+    pm25_wide = pm25_wide.reindex(columns=sensor_order).fillna(0)
+    spatial_lag_matrix = pm25_wide.values @ spatial_weights.values.T
+    spatial_lag_df = pd.DataFrame(
+        spatial_lag_matrix, index=pm25_wide.index, columns=sensor_order
+    )
+
+    split_date = pd.Timestamp(TEST_PERIOD_START).date()
     results = []
-    current_date = datetime.strptime(TEST_PERIOD_START, "%Y-%m-%d")
-    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
 
-    while current_date <= end_dt:
-        date_data = data_d[data_d.index == current_date.date()].copy()
-        date_data = (
-            sensors[["sensor_index"]]
-            .merge(date_data.reset_index(), on="sensor_index", how="left")
-            .set_index("sensor_index")
+    for i, sensor_id in enumerate(sensor_order):
+        print(f"Sensor {sensor_id} ({i + 1}/{len(sensor_order)})")
+
+        sensor_data = data_all[data_all["sensor_index"] == sensor_id].copy()
+        if sensor_data.empty:
+            continue
+
+        sensor_data["spatial_lag_pm25"] = (
+            spatial_lag_df[sensor_id].reindex(sensor_data.index).values
         )
-        date_data = date_data[~date_data.index.duplicated(keep="first")]
 
-        for sensor_index in date_data.index.unique():
-            if date_data.loc[[sensor_index]].empty:
-                continue
-            X_train, X_test, y_train, y_test = get_train_test_data_for_sensor(
-                date_data, sensor_index, spatial_weights
-            )
-            if X_train.empty or X_test.empty:
-                continue
-            out = train_evaluate_spatial(X_train, X_test, y_train, y_test)
+        feature_cols = [
+            c for c in SPATIAL_FEATURES
+            if c in sensor_data.columns and sensor_data[c].notna().any()
+        ]
+        if not feature_cols:
+            continue
+
+        train = sensor_data[sensor_data.index < split_date]
+        test  = sensor_data[sensor_data.index >= split_date]
+
+        if train.empty or test.empty:
+            print(f"  Skipping: insufficient train/test data")
+            continue
+
+        pipeline = Pipeline([
+            ("imputer", SimpleImputer(strategy="median")),
+            ("xgbreg", XGBRegressor(n_estimators=100, random_state=42)),
+        ])
+        pipeline.fit(train[feature_cols], train["pm25"])
+        y_pred = pipeline.predict(test[feature_cols])
+
+        for date, actual, pred in zip(test.index, test["pm25"].values, y_pred):
             results.append({
-                "Date":         current_date.date(),
-                "Sensor Index": sensor_index,
-                "Y Test":  out["y_test"].values[0] if len(out["y_test"]) > 0 else None,
-                "Y Pred":  out["y_pred"][0]         if len(out["y_pred"]) > 0 else None,
-                "MAE":  out["mae"],
-                "RMSE": out["rmse"],
+                "Date":         date,
+                "Sensor Index": sensor_id,
+                "Y Test":       actual,
+                "Y Pred":       pred,
             })
 
-        current_date += timedelta(days=1)
-
     pd.DataFrame(results).to_csv("datasets/spatial_results.csv", index=False)
+    print(f"Saved {len(results)} predictions to datasets/spatial_results.csv")

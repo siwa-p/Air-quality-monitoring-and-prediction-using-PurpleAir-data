@@ -37,6 +37,10 @@ def run_arima(merged_csv: str = "datasets/merged_data.csv",
 
         X.replace([np.inf, -np.inf], np.nan, inplace=True)
         X_test.replace([np.inf, -np.inf], np.nan, inplace=True)
+        # Drop columns that are entirely NaN in training (mean can't fill them)
+        all_nan_cols = X.columns[X.isna().all()].tolist()
+        X = X.drop(columns=all_nan_cols)
+        X_test = X_test.drop(columns=all_nan_cols)
         X = X.fillna(X.mean())
         X_test = X_test.fillna(X_test.mean())
 

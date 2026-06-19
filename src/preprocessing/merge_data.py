@@ -2,6 +2,10 @@ import duckdb
 import pandas as pd
 
 from src.config import DB_PATH, NOAA_STATIONS, ACTIVE_CITY, PM25_OUTLIER_THRESHOLD
+from src.preprocessing.sensor_filter import apply_ema_filter
+
+# Columns where 0 is not a valid imputation — forward-fill instead
+_FORWARD_FILL_COLS = ["TAVG", "TMAX", "TMIN", "AWND", "WDF2", "WDF5", "WSF2", "WSF5"]
 
 
 def load_weather_df(station_id: str = None) -> pd.DataFrame:
@@ -50,12 +54,18 @@ def build_merged_csv(
         merged = con.execute(query).df()
 
     merged["time_stamp"] = pd.to_datetime(merged["time_stamp"]).dt.date
-    merged.fillna({
-        "AWND": 0, "PRCP": 0, "SNOW": 0, "SNWD": 0, "TAVG": 0,
-        "TMAX": 0, "TMIN": 0, "WDF2": 0, "WDF5": 0, "WSF2": 0,
-        "WSF5": 0, "WT01": 0, "WT02": 0, "WT03": 0, "WT04": 0,
-        "WT05": 0, "WT06": 0, "WT08": 0,
-    }, inplace=True)
+
+    # Forward-fill temperature / wind before falling back to 0
+    merged = merged.sort_values("time_stamp")
+    for col in [c for c in _FORWARD_FILL_COLS if c in merged.columns]:
+        merged[col] = merged[col].ffill()
+    merged.fillna(0, inplace=True)
+
+    # EMA smoothing per sensor to reduce measurement noise
+    merged = merged.sort_values(["sensor_index", "time_stamp"])
+    merged = apply_ema_filter(merged, "pm25", span=7)
+    merged["pm25"] = merged["pm25_ema"]
+    merged = merged.drop(columns=["pm25_ema"])
 
     merged.to_csv(output_csv, index=False)
     print(f"Saved {len(merged)} rows to {output_csv}")

@@ -7,6 +7,7 @@ from sklearn.metrics import root_mean_squared_error
 
 from src.config import DB_PATH, NOAA_STATIONS, ACTIVE_CITY, TEST_PERIOD_START, PM25_OUTLIER_THRESHOLD
 from src.preprocessing.merge_data import load_weather_df
+from src.preprocessing.sensor_filter import apply_ema_filter
 
 DROP_META = ["sensor_index", "name", "latitude", "longitude",
              "STATION", "LATITUDE", "LONGITUDE", "ELEVATION"]
@@ -32,7 +33,12 @@ def preprocess_temporal_data(
     sensor_data: pd.DataFrame,
     weather_df: pd.DataFrame,
 ) -> pd.DataFrame:
+    sensor_data = sensor_data.copy()
     sensor_data["time_stamp"] = pd.to_datetime(sensor_data["time_stamp"])
+    # EMA smoothing before indexing so apply_ema_filter can see time_stamp + sensor_index columns
+    sensor_data = apply_ema_filter(sensor_data, "pm25", span=7)
+    sensor_data["pm25"] = sensor_data["pm25_ema"]
+    sensor_data = sensor_data.drop(columns=["pm25_ema"])
     sensor_data.set_index("time_stamp", inplace=True)
     sensor_data = sensor_data.sort_index()
     sensor_data.index = sensor_data.index.date
@@ -43,11 +49,13 @@ def preprocess_temporal_data(
     merged = pd.merge(sensor_data, weather_df, left_index=True, right_index=True)
     merged = merged[merged["pm25"] < PM25_OUTLIER_THRESHOLD]
 
-    merged["pm25_lag1"]  = merged["pm25"].shift(1)
-    merged["pm25_lag7"]  = merged["pm25"].shift(7)
-    merged["pm25_lag14"] = merged["pm25"].shift(14)
-    merged["pm25_lag30"] = merged["pm25"].shift(30)
-    merged["pm25_roll7"] = merged["pm25"].rolling(7, min_periods=1).mean()
+    merged["pm25_lag1"]     = merged["pm25"].shift(1)
+    merged["pm25_lag7"]     = merged["pm25"].shift(7)
+    merged["pm25_lag14"]    = merged["pm25"].shift(14)
+    merged["pm25_lag30"]    = merged["pm25"].shift(30)
+    merged["pm25_lag365"]   = merged["pm25"].shift(365)   # same day last year — captures annual cycle
+    merged["pm25_roll7"]    = merged["pm25"].rolling(7, min_periods=1).mean()
+    merged["pm25_roll7_std"] = merged["pm25"].rolling(7, min_periods=2).std()  # volatility regime flag
 
     dt_index = pd.to_datetime(merged.index)
     merged["month"]       = dt_index.month
@@ -90,11 +98,16 @@ if __name__ == "__main__":
         data = load_data(sensor_chosen)
         processed = preprocess_temporal_data(data, weather_df)
 
+        processed = processed.dropna(axis=1, how="all")
+        if processed.empty or "pm25" not in processed.columns:
+            print(f"No usable columns for sensor {sensor_chosen}")
+            continue
+
         imputer = SimpleImputer()
         df_imp = pd.DataFrame(
             imputer.fit_transform(processed),
             columns=processed.columns,
-            index=processed.index,
+            index=pd.to_datetime(processed.index),
         )
 
         train = df_imp[:TEST_PERIOD_START]
@@ -121,3 +134,4 @@ if __name__ == "__main__":
         })
 
     pd.DataFrame(sensor_results).to_csv("datasets/temporal_results.csv", index=False)
+    print(f"Saved {len(sensor_results)} sensor results to datasets/temporal_results.csv")

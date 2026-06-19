@@ -1,14 +1,3 @@
-"""
-Fetch PM2.5 sensor locations and daily/hourly measurements from OpenAQ v3 API.
-
-Setup:
-    Register free at https://explore.openaq.org/register
-    Add to .env:  OPENAQ_API_KEY=<your_key>
-
-Usage:
-    uv run python -m src.ingestion.get_openaq
-"""
-
 import os
 import time
 import requests
@@ -70,7 +59,7 @@ def _get(path: str, params: dict) -> dict:
     url = f"{BASE_URL}{path}"
     for attempt in range(MAX_RETRIES):
         resp = requests.get(url, headers=_headers(), params=params, timeout=60)
-        if resp.status_code in (408, 429):
+        if resp.status_code in (408, 429, 500):
             wait = BACKOFF_BASE ** (attempt + 1)
             logger.warning(f"HTTP {resp.status_code}; retrying in {wait}s (attempt {attempt + 1}/{MAX_RETRIES})")
             time.sleep(wait)
@@ -149,7 +138,10 @@ def _fetch_chunked(path: str, date_from: str, date_to: str) -> list[dict]:
     end = date.fromisoformat(date_to)
     while cursor <= end:
         chunk_end = min(date(cursor.year + 1, cursor.month, cursor.day) - timedelta(days=1), end)
-        records.extend(_fetch_paged(path, cursor, chunk_end))
+        try:
+            records.extend(_fetch_paged(path, cursor, chunk_end))
+        except requests.HTTPError as e:
+            logger.warning(f"Chunk {cursor} → {chunk_end} failed ({e}), skipping chunk")
         cursor = chunk_end + timedelta(days=1)
         time.sleep(SLEEP)
     return records
@@ -164,7 +156,7 @@ def _parse_rows(records: list[dict], sensor_id: int) -> list[dict]:
         if ts is None or r.get("value") is None:
             continue
         rows.append({
-            "time_stamp": pd.Timestamp(ts),
+            "time_stamp": pd.Timestamp(ts).tz_localize(None) if pd.Timestamp(ts).tzinfo is None else pd.Timestamp(ts).tz_convert("UTC").tz_localize(None),
             "sensor_index": sensor_id,
             "pm25": r["value"],
         })
@@ -188,7 +180,7 @@ def ingest_daily(start_date: str, end_date: str, con: duckdb.DuckDBPyConnection)
             continue
 
         df = pd.DataFrame(rows).drop_duplicates(subset=["sensor_index", "time_stamp"])
-        con.execute("INSERT OR REPLACE INTO raw.data_daily SELECT * FROM df")
+        con.execute("INSERT OR IGNORE INTO raw.data_daily SELECT * FROM df")
         logger.info(f"Sensor {sensor_id}: stored {len(df)} daily rows")
         time.sleep(SLEEP)
 
@@ -210,7 +202,7 @@ def ingest_hourly(start_date: str, end_date: str, con: duckdb.DuckDBPyConnection
             continue
 
         df = pd.DataFrame(rows).drop_duplicates(subset=["sensor_index", "time_stamp"])
-        con.execute("INSERT OR REPLACE INTO raw.data_hourly SELECT * FROM df")
+        con.execute("INSERT OR IGNORE INTO raw.data_hourly SELECT * FROM df")
         logger.info(f"Sensor {sensor_id}: stored {len(df)} hourly rows")
         time.sleep(SLEEP)
 
