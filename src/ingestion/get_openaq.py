@@ -251,4 +251,5 @@ def main():
 
 
 if __name__ == "__main__":
+    logger.add("logs/openaq_ingest.log", rotation="10 MB", retention=3)
     main()

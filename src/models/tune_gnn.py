@@ -29,8 +29,8 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 def prepare_data() -> tuple[np.ndarray, object]:
     """Load data and assemble feature matrix. Called once before tuning."""
-    pm25_matrix, sensor_ids, dates = load_sensor_matrix(DB_PATH)
-    matrix = build_feature_matrix(pm25_matrix, load_weather_matrix(DB_PATH, dates), dates)
+    pm25_raw, pm25_smooth, sensor_ids, dates = load_sensor_matrix(DB_PATH)
+    matrix = build_feature_matrix(pm25_raw, pm25_smooth, load_weather_matrix(DB_PATH, dates), dates)
 
     with duckdb.connect(DB_PATH, read_only=True) as con:
         sensors_df = con.execute(
@@ -145,4 +145,5 @@ def tune():
 
 
 if __name__ == "__main__":
+    logger.add("logs/tune_gnn.log", rotation="10 MB", retention=3)
     tune()

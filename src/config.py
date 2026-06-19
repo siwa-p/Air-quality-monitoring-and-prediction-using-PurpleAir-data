@@ -14,5 +14,9 @@ BOUNDING_BOXES = {
 
 ACTIVE_CITY = "los_angeles"
 
+# Tighter bbox for GNN/spatial models — dense LA basin core only.
+# Excludes Lancaster, Victorville, Riverside (meteorologically distinct from basin).
+SPATIAL_BBOX = dict(lon_min=-118.7, lat_min=33.7, lon_max=-117.8, lat_max=34.4)
+
 TEST_PERIOD_START = "2024-01-08"
-PM25_OUTLIER_THRESHOLD = 1000
+PM25_OUTLIER_THRESHOLD = 200

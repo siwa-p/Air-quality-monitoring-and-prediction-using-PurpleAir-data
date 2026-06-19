@@ -118,4 +118,5 @@ def main():
 
 
 if __name__ == "__main__":
+    logger.add("logs/weather_ingest.log", rotation="10 MB", retention=3)
     main()

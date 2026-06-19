@@ -2,15 +2,16 @@ import duckdb
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+from loguru import logger
 from sklearn.neighbors import NearestNeighbors
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import root_mean_squared_error, mean_absolute_error
 from xgboost import XGBRegressor
 
-from src.config import DB_PATH, NOAA_STATIONS, ACTIVE_CITY, TEST_PERIOD_START, PM25_OUTLIER_THRESHOLD
+from src.config import DB_PATH, NOAA_STATIONS, ACTIVE_CITY, TEST_PERIOD_START, PM25_OUTLIER_THRESHOLD, SPATIAL_BBOX
 from src.preprocessing.merge_data import load_weather_df
-from src.preprocessing.sensor_filter import apply_ema_filter
+from src.preprocessing.sensor_filter import apply_hampel_filter
 
 WEATHER_FEATURES = ["AWND", "PRCP", "SNOW", "TMAX", "TMIN", "WSF2", "WDF2"]
 SPATIAL_FEATURES = ["spatial_lag_pm25"] + WEATHER_FEATURES
@@ -25,6 +26,7 @@ def calculate_spatial_weights(sensors: pd.DataFrame) -> pd.DataFrame:
     distances = distances[:, 1:]
 
     sensors_idx = sensors.set_index("sensor_index")
+    distances = np.where(distances == 0, 1e-9, distances)   # guard against collocated sensors
     weights = 1 / distances
     weights_dict = {}
     for i, sid in enumerate(sensors_idx.index):
@@ -82,8 +84,14 @@ def train_evaluate_spatial(X_train, X_test, y_train, y_test) -> dict:
 
 
 if __name__ == "__main__":
+    logger.add("logs/spatial_run.log", rotation="10 MB", retention=3)
+    bb = SPATIAL_BBOX
     with duckdb.connect(DB_PATH, read_only=True) as con:
-        sensors = con.execute("SELECT sensor_index, latitude, longitude FROM sensor_table").df()
+        sensors = con.execute(f"""
+            SELECT sensor_index, latitude, longitude FROM sensor_table
+            WHERE longitude BETWEEN {bb['lon_min']} AND {bb['lon_max']}
+              AND latitude  BETWEEN {bb['lat_min']} AND {bb['lat_max']}
+        """).df()
 
     spatial_weights = calculate_spatial_weights(sensors)
     weather_df = load_weather_df()
@@ -92,20 +100,27 @@ if __name__ == "__main__":
     data_all = get_data_all("2022-04-01", end_date)
     data_all = data_all.sort_index()
 
-    # Apply EMA smoothing per sensor before modelling
+    # Hampel filter per sensor: remove spikes. Target stays raw (Hampel-cleaned) pm25.
     data_reset = data_all.reset_index()
-    # Index name is lost when assigning date objects; restore it
     if "time_stamp" not in data_reset.columns:
         data_reset = data_reset.rename(columns={"index": "time_stamp"})
-    data_reset = apply_ema_filter(data_reset, "pm25", span=7)
-    data_reset["pm25"] = data_reset["pm25_ema"]
-    data_all = data_reset.drop(columns=["pm25_ema"]).set_index("time_stamp")
+    data_reset = data_reset.sort_values(["sensor_index", "time_stamp"])
+    data_reset["pm25"] = (
+        data_reset.groupby("sensor_index")["pm25"]
+        .transform(lambda s: apply_hampel_filter(s.reset_index(drop=True), window=3, k=3.0).values)
+    )
+    # EMA span=3 only for spatial lag computation — not applied to prediction target.
+    data_reset["pm25_smooth"] = (
+        data_reset.groupby("sensor_index")["pm25"]
+        .transform(lambda s: s.ewm(span=3, adjust=False).mean())
+    )
+    data_all = data_reset.set_index("time_stamp")
 
     data_all = merge_weather(data_all, weather_df)
 
-    # Vectorized spatial lag: pivot to (date × sensor), multiply once for all dates
+    # Vectorized spatial lag: pivot to (date × sensor) using smooth pm25, multiply once
     pm25_wide = data_all.pivot_table(
-        index=data_all.index, columns="sensor_index", values="pm25", aggfunc="first"
+        index=data_all.index, columns="sensor_index", values="pm25_smooth", aggfunc="first"
     )
     sensor_order = spatial_weights.index.tolist()
     pm25_wide = pm25_wide.reindex(columns=sensor_order).fillna(0)
@@ -114,11 +129,13 @@ if __name__ == "__main__":
         spatial_lag_matrix, index=pm25_wide.index, columns=sensor_order
     )
 
+    data_all = data_all.drop(columns=["pm25_smooth"])
+
     split_date = pd.Timestamp(TEST_PERIOD_START).date()
     results = []
 
     for i, sensor_id in enumerate(sensor_order):
-        print(f"Sensor {sensor_id} ({i + 1}/{len(sensor_order)})")
+        logger.info(f"Sensor {sensor_id} ({i + 1}/{len(sensor_order)})")
 
         sensor_data = data_all[data_all["sensor_index"] == sensor_id].copy()
         if sensor_data.empty:
@@ -139,7 +156,7 @@ if __name__ == "__main__":
         test  = sensor_data[sensor_data.index >= split_date]
 
         if train.empty or test.empty:
-            print(f"  Skipping: insufficient train/test data")
+            logger.debug(f"Sensor {sensor_id}: insufficient train/test data, skipping")
             continue
 
         pipeline = Pipeline([
@@ -158,4 +175,4 @@ if __name__ == "__main__":
             })
 
     pd.DataFrame(results).to_csv("datasets/spatial_results.csv", index=False)
-    print(f"Saved {len(results)} predictions to datasets/spatial_results.csv")
+    logger.info(f"Saved {len(results)} predictions to datasets/spatial_results.csv")
