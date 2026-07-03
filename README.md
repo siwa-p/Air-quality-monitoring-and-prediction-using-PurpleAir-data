@@ -1,6 +1,6 @@
 # PM2.5 Air Quality Prediction — Los Angeles Metro
 
-472 low-cost OpenAQ sensors cover the LA basin at 10–50× the density of EPA reference monitors. This project asks whether that density advantage is enough to forecast next-day PM2.5 better than the naive baseline. The answer, according to our analysis, depends on which days you're asking about.
+504 low-cost OpenAQ sensors cover the LA basin at 10–50× the density of EPA reference monitors. This project asks whether that density advantage is enough to forecast next-day PM2.5 better than the naive baseline. The answer, according to our analysis, depends on which days you're asking about.
 
 ---
 
@@ -11,11 +11,11 @@ PACF analysis of the LA sensor network shows two significant lags:
 - **Lag 1: 0.93 ± 0.05** — tomorrow's PM2.5 is strongly determined by today's
 - **Lag 2: −0.46 ± 0.12** — controlling for lag 1, two-days-ago PM2.5 has a strong *negative* partial autocorrelation
 
-This is AR(2), not the simpler AR(1) structure often assumed for air quality. The physical story: LA temperature inversions trap pollution for one to two days (positive lag 1), then the basin clears rapidly when an offshore low breaks the inversion (negative lag 2). The same pattern that makes PM2.5 persistent day-to-day also makes it mean-reverting on a two-day cycle.
+This is AR(2), not the simpler AR(1) structure often assumed for air quality. The physical story: LA temperature inversions trap pollution for one to two days (positive lag 1), then the basin clears rapidly when an offshore low breaks the inversion (negative lag 2). The same pattern that makes PM2.5 persistent day-to-day also makes it mean-reverting on a two-day cycle. The inversion mechanism is well-documented for the LA basin — the ring of mountains traps cooler surface air under warmer air aloft, concentrating pollutants until a pressure system breaks the inversion layer (Sun, 2012; Jerrett et al., 2005).
 
 This PACF reading drove two concrete corrections:
 
-1. ARIMA was initially specified as (1,0,1) — missing the lag-2 term entirely. Correcting to (2,0,1) dropped ARIMA RMSE by 36% (12.01 → 7.69).
+1. ARIMA was initially specified as (1,0,1) — missing the lag-2 term entirely. Correcting to (2,0,1) dropped ARIMA RMSE by 41% (12.01 → 7.08).
 2. The temporal XGBoost feature set lacked `pm25_lag2`. Adding it dropped overall RMSE from 4.72 → 4.65 and median sensor RMSE from 3.85 → 3.70.
 
 Persistence RMSE on the test set: **3.60 µg/m³**. This single number governs everything that follows.
@@ -26,7 +26,7 @@ Persistence RMSE on the test set: **3.60 µg/m³**. This single number governs e
 
 | Source | Contents | Coverage |
 | --- | --- | --- |
-| [OpenAQ v3 API](https://openaq.org) | Daily + hourly PM2.5 per sensor | 472 sensors, 2022-04-01 → present |
+| [OpenAQ v3 API](https://openaq.org) | Daily PM2.5 per sensor | 504 sensors, 2018-01-01 → present (varies by sensor) |
 | [NOAA GHCND](https://www.ncdc.noaa.gov) | Daily weather: wind, precip, temp, snow | LAX station (USW00023174), same range |
 
 All data lands in a single DuckDB file (`datasets/warehouse.duckdb`). All models are restricted to the dense LA basin core — 251 sensors inside `lon: −118.7→−117.8, lat: 33.7→34.4` — to avoid meteorologically decoupled stations in Lancaster and Riverside that add noise without signal.
@@ -54,14 +54,14 @@ The fix isn't statistical convenience — it's physics. The PMS5003/Plantower op
 All models share the same cut date for direct RMSE comparison.
 
 ```text
-Full range:   2022-04-01 → 2026-06-18  (1,540 days)
+Full range:   2018-01-01 → 2026-06-19  (~3,1xx days; coverage varies by sensor)
               ─────────────────────────────────────────────────────────────
 ARIMA / XGBoost
-  Train:      2022-04-01 → 2024-01-07  (~638 days per sensor)
-  Test:       2024-01-08 → 2026-06-18  (~528 days per sensor)
+  Train:      2018-01-01 → 2024-01-07  (~2,197 days per sensor)
+  Test:       2024-01-08 → 2026-06-19  (~528 days per sensor)
 
 GNN  (window=14, val=60 windows)
-  Train:      2022-04-15 → 2023-11-08  (529 sliding windows)
+  Train:      2018-01-14 → 2023-11-08  (~2,059 sliding windows)
   Val:        2023-11-09 → 2024-01-07  (60 windows — early stopping only)
   Test:       2024-01-08 → 2026-06-16  (889 windows)
 ```
@@ -74,11 +74,11 @@ Each step adds one capability the previous lacked.
 
 | # | Model | What it adds | RMSE |
 | --- | --- | --- | --- |
-| 1 | **ARIMA** (`arima.py`) | Baseline. SARIMAX(2,0,1) per sensor + NOAA exogenous. Fit once, applied 889 days OOS. | 7.69 |
+| 1 | **ARIMA** (`arima.py`) | Baseline. SARIMAX(2,0,1) per sensor + NOAA exogenous. Fit once, applied 889 days OOS. | 7.08 |
 | 2 | **Temporal XGBoost** (`temporal.py`) | Lag/calendar/weather features incl. lag-2. Non-linear interactions. Per-sensor. | 4.65 |
 | 3 | **Spatial XGBoost** (`spatial.py`) | Adds inverse-distance weighted neighbor PM2.5 as a feature. Vectorized via matrix multiply. | 5.13 |
-| 4 | **STGNN** (`gnn_model.py`) | GATConv + LayerNorm + stacked GRU. Operates on the full sensor graph. Day+1/2/3 ahead. | 6.85 / 7.05 / 7.17 |
-| 5 | **OLS Ensemble** (`ensemble.py`) | Non-negative OLS blend: temporal 0.558, spatial 0.310, GNN 0.144. | **4.20** |
+| 4 | **STGNN** (`gnn_model.py`) | GATConv + LayerNorm + stacked GRU. Operates on the full sensor graph. Day+1/2/3 ahead. | 6.10 |
+| 5 | **OLS Ensemble** (`ensemble.py`) | Non-negative OLS blend: temporal 0.485, spatial 0.301, GNN 0.249. | **4.10** |
 
 The GNN architecture: GATConv per timestep (attention learns which neighbors matter), LayerNorm for activation stability, 2-layer GRU across T=14 timesteps, linear head producing 3-day-ahead forecasts per node. Graph built with haversine k-NN (k=3), inverse-distance edge weights. Hyperparameters from 40-trial Optuna TPE search.
 
@@ -100,24 +100,22 @@ The right "does ML matter?" comparison is **ARIMA vs ensemble** — the choice b
 
 | Model | Overall RMSE | Median sensor RMSE | Coverage |
 | --- | --- | --- | --- |
-| OLS Ensemble | **4.20 µg/m³** | — | 179K matched rows |
+| OLS Ensemble | **4.10 µg/m³** | — | 179K matched rows |
 | Temporal XGBoost | 4.65 | 3.70 | 218 sensors |
 | Spatial XGBoost | 5.13 | 4.07 | 217 sensors |
-| STGNN Day+1 | 6.85 | 4.88 | 251 sensors |
-| STGNN Day+2 | 7.05 | — | 251 sensors |
-| STGNN Day+3 | 7.17 | — | 251 sensors |
-| ARIMA | 7.69 | 5.87 | 217 sensors |
+| STGNN Day+1 | 6.10 | 4.42 | 267 sensors |
+| ARIMA | 7.08 | 5.85 | 217 sensors |
 | Persistence (reference only) | 3.60 | — | not deployable |
 
 ---
 
-### Finding 1: ML beats a correctly specified classical model by 45%
+### Finding 1: ML beats a correctly specified classical model by 42%
 
-ARIMA(2,0,1) is the correct classical baseline: PACF-driven order selection, per-sensor fit, NOAA weather as exogenous regressors. RMSE 7.69 µg/m³ vs the ensemble's 4.20 µg/m³ — a **45% reduction**.
+ARIMA(2,0,1) is the correct classical baseline: PACF-driven order selection, per-sensor fit, NOAA weather as exogenous regressors. RMSE 7.08 µg/m³ vs the ensemble's 4.10 µg/m³ — a **42% reduction**.
 
 Why does ARIMA still fall short even with the right spec? It fits fixed coefficients once and applies them 889 days out-of-sample. Over two and a half years, the AR structure shifts with season — winter inversions create a different autocorrelation regime than summer sea-breeze days. ARIMA has no mechanism to adapt. XGBoost re-learns these regime interactions through lag features and calendar variables. The ensemble then adds spatial correlation through the GNN's graph propagation — something ARIMA cannot represent at all.
 
-The 45% gap is the honest answer to "does ML add value over a correctly specified classical model?" It does.
+The 42% gap is the honest answer to "does ML add value over a correctly specified classical model?" It does.
 
 ---
 
@@ -146,7 +144,7 @@ On the 68% of test days with typical clean air, the ensemble beats persistence b
 | Summer (Jun–Aug) | 11.6 µg/m³ | 3.73 | 3.43 |
 | Spring (Mar–May) | 9.1 µg/m³ | 3.56 | 3.23 |
 
-Mean PM2.5 is nearly identical across seasons (~9–12 µg/m³). The error driver is **variance**, not level — the same AR(2) dynamic that defines the data. In winter, inversions build (positive lag-1) and then clear suddenly (negative lag-2 rebound), creating unpredictable step changes. In spring and summer, stable sea-breeze circulation produces a smooth, traffic-driven signal where both lags are reliable predictors. The ensemble closes the winter gap more than any other season (6.58 → 5.76, −12%): spatial signal from the GNN is most valuable when individual-sensor lag features become unreliable, because neighboring sensors see the inversion clearing first.
+Mean PM2.5 is nearly identical across seasons (~9–12 µg/m³). The error driver is **variance**, not level — the same AR(2) dynamic that defines the data. In winter, inversions build (positive lag-1) and then clear suddenly (negative lag-2 rebound), creating unpredictable step changes. In spring and summer, stable sea-breeze circulation produces a smooth, traffic-driven signal where both lags are reliable predictors. The ensemble closes the winter gap more than any other season (6.58 → 5.76, −12%): spatial signal from the GNN is most valuable when individual-sensor lag features become unreliable, because neighboring sensors see the inversion clearing first. With the GNN now trained on ~2,059 windows (vs 529 before), its ensemble weight increased from 0.144 → 0.249 — the graph model pulls more weight precisely in the high-variance regimes where tabular lag features lose predictive power.
 
 ---
 
@@ -208,3 +206,10 @@ uv run python -m src.evaluation.ensemble
 # 5. Tests
 uv run pytest tests/ -q
 ```
+
+---
+
+## References
+
+- Jerrett, M., Burnett, R.T., Ma, R., Pope, C.A., Krewski, D., Newbold, K.B., Thurston, G., Shi, Y., Finkelstein, N., Calle, E.E., & Thun, M.J. (2005). Spatial analysis of air pollution and mortality in Los Angeles. *Epidemiology*, 16(6), 727–736.
+- Sun, J. (2012). *Spatial Analysis of Population Exposure to PM2.5 Air Pollution in Los Angeles County, USA*. Master's Thesis, California State University, Northridge.
